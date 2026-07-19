@@ -1,19 +1,37 @@
-# Circles
+# Circuli
 
-An example [Tildagon](https://github.com/emfcamp/badge-2024-software) badge app.
-It draws three concentric circles centred on the display and exits to the
-launcher when the **CANCEL** button is pressed.
+A ring puzzle for the [Tildagon](https://github.com/emfcamp/badge-2024-software)
+badge. Three concentric rings carry interlocking teeth; rotating one ring can
+catch and drag its neighbours. Line up every ring's alignment marker with the
+target at the top to solve it.
+
+## Controls
+
+| Button | Action |
+|---|---|
+| LEFT / RIGHT | Rotate the selected ring anticlockwise / clockwise |
+| UP / DOWN | Select the next ring outward / inward |
+| CONFIRM | New puzzle |
+| CANCEL | Exit to launcher |
+
+## How the rings catch
+
+Each ring has teeth on its inner and outer rims. When a rotating ring's tooth
+would move into a slot occupied by a neighbour's opposing tooth, it pushes that
+neighbour the same direction instead — and the push cascades. Turning back the
+other way separates them.
 
 ## Structure
 
-- `metadata.json` — Tildagon app metadata.
-- `__init__.py` — re-exports the `Circles` app class.
-- `app.py` — the `Circles` app: an `app.App` subclass with `update` and `draw`.
+- `game.py` — pure game logic (rings, teeth, the coupling rule, solvability). No
+  display or hardware imports, so it runs and tests under plain CPython.
+- `test_game.py` — unit tests for the logic: `python -m unittest test_game`.
+- `app.py` — the `Circuli` app: input handling and `ctx` rendering.
+- `metadata.json` / `__init__.py` — Tildagon app metadata and entry point.
 
-## Running
+## Developing
 
-This app is developed inside the `spaceagon` environment, which provides the
-simulator and badge tooling. From the `spaceagon` repo root:
+From the `spaceagon` environment:
 
-- `just sim` — run in the simulator.
+- `just sim` — run in the simulator; pick **Circuli** from the app list.
 - `just deploy` — install onto a USB-connected badge.

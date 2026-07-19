@@ -1,1 +1,1 @@
-from .app import Circles
+from .app import Circuli
