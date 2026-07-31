@@ -5,8 +5,8 @@ For each ring count, random machines are exhaustively distance-mapped by
 reverse breadth-first search over the real move graph (moves are not
 invertible, so solvability cannot be assumed from reversibility). The
 hardest properly-scrambled starts are harvested with their exact minimum
-solve distance and written to binary levels_<rings>.lvl files next to the
-app code (format documented alongside the decoder in game.py).
+solve distance and written to binary assets/levels_<rings>.lvl files
+(format documented alongside the decoder in game.py).
 
 Usage: python tools/generate_catalogue.py [seed]
 """
@@ -19,7 +19,6 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import game
 from game import (
     CATALOGUE_MAGIC,
     _apply,
@@ -144,10 +143,12 @@ def generate(rings, plan, rng):
     machines = 0
     t0 = time.time()
     while len(puzzles) < plan["want"] and machines < plan["machine_cap"]:
-        game.TEETH_MIN, game.TEETH_MAX = plan["densities"][
+        teeth_min, teeth_max = plan["densities"][
             rng.randrange(len(plan["densities"]))
         ]
-        machine = random_machine(rng, rings)
+        machine = random_machine(
+            rng, rings, teeth_min=teeth_min, teeth_max=teeth_max
+        )
         machines += 1
         dist, decode = distance_map(machine)
         picks = harvest(
@@ -165,7 +166,7 @@ def generate(rings, plan, rng):
         if picks:
             print(
                 f"rings {rings}: machine {machines} "
-                f"(teeth {game.TEETH_MIN}-{game.TEETH_MAX}) -> "
+                f"(teeth {teeth_min}-{teeth_max}) -> "
                 f"dists {sorted(d for d, _ in picks)}, "
                 f"total {len(puzzles)}/{plan['want']} [{time.time() - t0:.0f}s]",
                 flush=True,
@@ -191,8 +192,9 @@ def compose(entry_a, entry_b, rng, slots=12):
     inner = [list(t) for t in entry_a["inner"]] + [list(t) for t in entry_b["inner"]]
     outer = [list(t) for t in entry_a["outer"]] + [list(t) for t in entry_b["outer"]]
     k = len(entry_a["inner"])
+    n_teeth = 2 + rng.randrange(3)
     teeth = []
-    while len(teeth) < 2 + rng.randrange(3):
+    while len(teeth) < n_teeth:
         slot = rng.randrange(slots)
         if slot not in teeth:
             teeth.append(slot)
@@ -209,6 +211,9 @@ def compose(entry_a, entry_b, rng, slots=12):
 def compose_tier(plan, pools, rng):
     a_n, b_n = plan["halves"]
     pool_a, pool_b = pools[a_n], pools[b_n]
+    if not pool_a or not pool_b:
+        # A base tier came up empty; report rather than crash on randrange.
+        return []
     puzzles = []
     seen = set()
     attempts = 0
@@ -246,7 +251,10 @@ def main():
             print(f"rings {rings}: NO puzzles found — file not written", flush=True)
             continue
         dists = sorted(p["dist"] for p in puzzles)
-        path = os.path.join(out_dir, f"levels_{rings}.lvl")
+        assets = os.path.join(out_dir, "assets")
+        if not os.path.isdir(assets):
+            os.makedirs(assets)
+        path = os.path.join(assets, f"levels_{rings}.lvl")
         with open(path, "wb") as f:
             f.write(struct.pack("<3sBBH", CATALOGUE_MAGIC, 12, rings, len(puzzles)))
             for p in puzzles:
