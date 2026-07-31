@@ -2,9 +2,11 @@
 
 A ring puzzle for the [Tildagon](https://github.com/emfcamp/badge-2024-software) badge. Concentric rings carry interlocking teeth; rotating one ring can catch and drag its neighbours. Line up every ring's alignment marker with the target at the top to solve it.
 
-Puzzles come from a pre-generated level catalogue: random teeth layouts whose solvability and exact minimum solve distance are verified offline by exhaustive search (see `tools/generate_catalogue.py`), so every start is guaranteed solvable and properly hard for its tier. You start at 3 rings; solving a puzzle sweeps the badge LEDs once around the hexagon to a short victory arpeggio, then automatically advances to the next level, up to 8 rings. The LEDs then show a steady tally — one lit LED per puzzle solved this session. Progress resets when the app restarts. Glyphs on tabs at the display edge remind you what the game buttons do.
+Puzzles come from a pre-generated level catalogue: random teeth layouts whose solvability and exact minimum solve distance are verified offline by exhaustive search (see `tools/generate_catalogue.py`), so every start is guaranteed solvable and properly hard for its tier. You start at 3 rings; solving a puzzle sweeps the badge LEDs once around the hexagon, then automatically advances to the next level, up to 8 rings. The LEDs then show a steady tally — one lit LED per puzzle solved this session. Progress resets when the app restarts. Glyphs on tabs at the display edge remind you what the game buttons do.
 
 An instruction page opens when the app starts; any game button dismisses it.
+
+Something lives in the gap at the centre of the rings. Players who lean on the same button will meet it. Don't make it angry.
 
 ## Controls
 

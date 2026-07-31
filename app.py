@@ -9,7 +9,7 @@ from system.eventbus import eventbus
 from system.patterndisplay.events import PatternDisable, PatternEnable
 from tildagonos import tildagonos
 
-from .game import Game, Machine, catalogue_entry, catalogue_info
+from .game import Game, Machine, catalogue_entry, catalogue_info, reversible_moves
 
 DEBUG = False           # centre readout of ring slots and current selection
 
@@ -50,8 +50,14 @@ LED_COUNT = 12
 LED_TALLY_COLOR = (255, 210, 40)  # steady tally, one LED per solve
 LED_CYCLE_STEP_MS = 120           # sweep speed; full cycle ~1.7s with the beat
 
-# Victory arpeggio, one note as every third LED lights during the sweep.
-VICTORY_NOTES = ("C5", "E5", "G5", "C6")
+# The ominous vortex: hammering the same rotation feeds it; at the limit it
+# bursts and churns the rings with random reversible moves (teeth still
+# latch, and reversibility keeps the mess provably solvable).
+OMINOUS_LIMIT = 8       # same-move presses before the burst
+OMINOUS_VISIBLE = 2     # presses before the vortex starts to show
+BURST_MOVES = 6         # churn moves per burst
+BURST_STEP_MS = 90      # churn speed, one move per step
+LED_BURST_COLOR = (255, 30, 30)
 
 
 def _led_wheel(i, n=LED_COUNT):
@@ -115,7 +121,6 @@ class Circuli(app.App):
         self._leds_active = False
         self._cycle_ms = 0
         self._cycle_lit = -1
-        self._synth = None
         self._new_puzzle()
 
     def _layout(self):
@@ -153,6 +158,60 @@ class Circuli(app.App):
         self._layout()
         self.selected = 0
         self.solved = False
+        self._calm_vortex()
+        self._burst_left = 0
+        self._burst_ms = 0
+
+    def _calm_vortex(self):
+        self._repeat_move = None
+        self._repeat_count = 0
+
+    def _register_rotate(self, direction):
+        """Track same-move spam. Returns False when the vortex consumes the
+        press (burst triggered) instead of rotating."""
+        move = (self.selected, direction)
+        if move == self._repeat_move:
+            self._repeat_count += 1
+        else:
+            self._repeat_move = move
+            self._repeat_count = 1
+        if self._repeat_count >= OMINOUS_LIMIT:
+            self._start_burst()
+            return False
+        return True
+
+    def _start_burst(self):
+        self._calm_vortex()
+        self._burst_left = BURST_MOVES
+        self._burst_ms = 0
+        for i in range(1, LED_COUNT + 1):
+            tildagonos.leds[i] = LED_BURST_COLOR
+        tildagonos.leds.write()
+
+    def _advance_burst(self, delta):
+        # One churn move per step so the damage is watchable. Reversible
+        # moves only: the board stays solvable, however bad it looks.
+        self._burst_ms += delta
+        if self._burst_ms < BURST_STEP_MS:
+            return
+        self._burst_ms = 0
+        options = reversible_moves(self.machine, self.game.positions)
+        if not options:
+            self._burst_left = 0
+        else:
+            ring, d, _result = options[random.randrange(len(options))]
+            self.game.rotate(ring, d)
+            self._burst_left -= 1
+        if self._burst_left <= 0:
+            self._show_tally()
+            if self.game.is_solved():
+                self._mark_solved()
+
+    def _mark_solved(self):
+        self.solved = True
+        self.solve_count += 1
+        self._cycle_ms = 0
+        self._cycle_lit = -1
 
     def _request_new_puzzle(self):
         # A solved board advances the progression with nothing to lose (B
@@ -189,6 +248,10 @@ class Circuli(app.App):
         if self.dialog is not None:
             # The open dialog owns the buttons; its handlers close it.
             return True
+        if self._burst_left:
+            # The vortex is churning; input waits until it is spent.
+            self._advance_burst(delta)
+            return True
         if self.help_open:
             b = self.button_states
             if b.pressed(BUTTON_TYPES["CANCEL"]):
@@ -212,6 +275,7 @@ class Circuli(app.App):
             self.minimise()
             return True
         if b.pressed(BUTTON_TYPES["RIGHT"]):
+            self._calm_vortex()
             self._request_new_puzzle()
             return True
         if self.solved:
@@ -220,42 +284,19 @@ class Circuli(app.App):
         n = self.machine.rings
         if b.pressed(BUTTON_TYPES["UP"]):
             self.selected = (self.selected + 1) % n
+            self._calm_vortex()
         if b.pressed(BUTTON_TYPES["DOWN"]):
             self.selected = (self.selected - 1) % n
+            self._calm_vortex()
         if b.pressed(BUTTON_TYPES["CONFIRM"]):
-            self.game.rotate(self.selected, +1)
+            if self._register_rotate(+1):
+                self.game.rotate(self.selected, +1)
         if b.pressed(BUTTON_TYPES["LEFT"]):
-            self.game.rotate(self.selected, -1)
+            if self._register_rotate(-1):
+                self.game.rotate(self.selected, -1)
         if self.game.is_solved():
-            self.solved = True
-            self.solve_count += 1
-            self._cycle_ms = 0
-            self._cycle_lit = -1
+            self._mark_solved()
         return True
-
-    def _ensure_audio(self):
-        # Lazily build a synth voice. Audio must never take the game down, so
-        # any failure (no speaker, bl00mbox API drift) marks the synth broken
-        # and the tune simply doesn't play.
-        if self._synth is not None:
-            return
-        try:
-            import bl00mbox
-
-            self._blm = bl00mbox.Channel("Circuli")
-            self._synth = self._blm.new(bl00mbox.patches.tinysynth)
-            self._synth.signals.output = self._blm.mixer
-        except Exception:
-            self._synth = False
-
-    def _play_note(self, name):
-        if not self._synth:
-            return
-        try:
-            self._synth.signals.pitch.tone = name
-            self._synth.signals.trigger.start()
-        except Exception:
-            self._synth = False
 
     def _show_tally(self):
         # Steady display: one lit LED per puzzle solved this session.
@@ -276,9 +317,6 @@ class Circuli(app.App):
         lit = min(step, LED_COUNT)
         if lit != self._cycle_lit:
             self._cycle_lit = lit
-            if lit < LED_COUNT and lit % 3 == 0:
-                self._ensure_audio()
-                self._play_note(VICTORY_NOTES[lit // 3])
             for i in range(1, LED_COUNT + 1):
                 tildagonos.leds[i] = _led_wheel(i - 1) if i <= lit else (0, 0, 0)
             tildagonos.leds.write()
@@ -320,6 +358,10 @@ class Circuli(app.App):
         # rings can never obscure it.
         for i in range(self.machine.rings):
             self._draw_marker(ctx, i)
+        if not self.solved and (
+            self._burst_left or self._repeat_count >= OMINOUS_VISIBLE
+        ):
+            self._draw_vortex(ctx)
         if self.solved:
             self._draw_cracked(ctx)
         elif DEBUG:
@@ -369,10 +411,13 @@ class Circuli(app.App):
             "the dotted line.",
             "Teeth catch and drag",
             "neighbouring rings!",
+            "Don't make it angry tho!",
         )
         for i, line in enumerate(goal):
+            if i == len(goal) - 1:
+                ctx.rgb(0.9, 0.3, 0.4)
             ctx.begin_path()
-            ctx.move_to(0, -44 + i * 16)
+            ctx.move_to(0, -52 + i * 15)
             ctx.text(line)
         ctx.rgb(0.7, 0.7, 0.7)
         ctx.font_size = 13
@@ -383,13 +428,33 @@ class Circuli(app.App):
         )
         for i, line in enumerate(controls):
             ctx.begin_path()
-            ctx.move_to(0, 46 + i * 15)
+            ctx.move_to(0, 44 + i * 14)
             ctx.text(line)
         ctx.rgb(0.45, 0.45, 0.45)
         ctx.font_size = 12
         ctx.begin_path()
-        ctx.move_to(0, 96)
+        ctx.move_to(0, 92)
         ctx.text("press any key")
+
+    def _draw_vortex(self, ctx):
+        # Something ominous in the centre gap. It grows with each repeated
+        # press of the same rotation, and spins wildly while bursting.
+        if self._burst_left:
+            intensity = 1.0
+            spin = self.t / 60.0
+        else:
+            intensity = self._repeat_count / OMINOUS_LIMIT
+            spin = self.t / 400.0
+        pulse = 0.5 + 0.5 * math.sin(self.t / 90.0)
+        r = 4 + 16 * intensity
+        ctx.rgb(0.25 * intensity + 0.2 * intensity * pulse, 0.02, 0.35 * intensity)
+        ctx.begin_path()
+        ctx.arc(0, 0, r, 0, 2 * math.pi, False)
+        ctx.fill()
+        ctx.rgb(0.5 + 0.4 * intensity * pulse, 0.1, 0.25)
+        for k in range(5):
+            angle = spin + k * (2 * math.pi / 5)
+            _tooth(ctx, r, r + 3 + 3 * intensity * pulse, angle, 1.5 + 2 * intensity)
 
     def _draw_key_hints(self, ctx):
         # Compact reminders at the physical button angles: C (+30) rotates CW,
