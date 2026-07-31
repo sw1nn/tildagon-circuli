@@ -18,7 +18,6 @@ MAX_RINGS = 5           # progression cap; the 240px display gets cramped above
 R_INNER = 40
 R_OUTER = 100
 TOOTH_RATIO = 0.43      # tooth length as a fraction of ring spacing
-MARKER_MIN = 7          # alignment markers never shrink below this
 
 RING_COLORS = [
     (1.0, 0.35, 0.35),
@@ -60,21 +59,6 @@ def _tooth(ctx, r0, r1, angle, half_w):
     ctx.fill()
 
 
-def _triangle(ctx, r_base, angle, size, outward=True):
-    """Fill a triangle at `angle` whose tip points radially out (or in)."""
-    ca, sa = math.cos(angle), math.sin(angle)
-    tip_r = r_base + size if outward else r_base - size
-    tx, ty = tip_r * ca, tip_r * sa
-    hw = size * 0.7
-    b1x, b1y = r_base * ca - sa * hw, r_base * sa + ca * hw
-    b2x, b2y = r_base * ca + sa * hw, r_base * sa - ca * hw
-    ctx.begin_path()
-    ctx.move_to(tx, ty)
-    ctx.line_to(b1x, b1y)
-    ctx.line_to(b2x, b2y)
-    ctx.close_path()
-    ctx.fill()
-
 
 
 class Circuli(app.App):
@@ -97,7 +81,6 @@ class Circuli(app.App):
         self.radii = [R_INNER + i * spacing for i in range(n)]
         self.tooth_len = spacing * TOOTH_RATIO
         self.tooth_half_w = max(2.0, self.tooth_len * 0.35)
-        self.marker_size = max(MARKER_MIN, spacing * 0.37)
 
     def _new_puzzle(self, ring_count=None):
         if ring_count is not None:
@@ -322,11 +305,18 @@ class Circuli(app.App):
             _tooth(ctx, r - self.tooth_len, r, _slot_angle(m, p + off), self.tooth_half_w)
 
     def _draw_marker(self, ctx, i):
-        # Alignment marker (ring-frame offset 0), tip pointing outward.
+        # Alignment marker (ring-frame offset 0): a yellow section of the ring
+        # itself, half a slot wide. Solved when every section sits under the
+        # dotted target line.
         r = self.radii[i]
         p = self.game.positions[i]
-        ctx.rgb(*self._ring_color(i, i == self.selected))
-        _triangle(ctx, r + self.tooth_len + 3, _slot_angle(self.machine, p), self.marker_size, outward=True)
+        a = _slot_angle(self.machine, p)
+        half = math.pi / self.machine.slots / 2
+        ctx.rgb(1.0, 0.9, 0.2)
+        ctx.line_width = (5 if i == self.selected else 3) + 2
+        ctx.begin_path()
+        ctx.arc(0, 0, r, a - half, a + half, False)
+        ctx.stroke()
 
     def _draw_cracked(self, ctx):
         ctx.rgb(*SOLVED_COLOR)
