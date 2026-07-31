@@ -34,16 +34,22 @@ def default_machine():
     )
 
 
+TEETH_MIN = 3
+TEETH_MAX = 5
+
+
 def random_machine(rng, rings, slots=12):
-    """A random safe: each shared gap gets 1..3 outer and 1..3 inner teeth at
-    distinct random slots, so nothing overlaps at rest and the solved state is
-    valid by construction. The decorative rims (innermost inner, outermost
-    outer) stay empty. Uses only rng.randrange, which MicroPython provides."""
+    """A random safe: each shared gap gets TEETH_MIN..TEETH_MAX outer and
+    inner teeth at distinct random slots, so nothing overlaps at rest and the
+    solved state is valid by construction. The decorative rims (innermost
+    inner, outermost outer) stay empty. Uses only rng.randrange, which
+    MicroPython provides."""
     inner_teeth = [[] for _ in range(rings)]
     outer_teeth = [[] for _ in range(rings)]
+    span = TEETH_MAX - TEETH_MIN + 1
     for gap in range(rings - 1):
-        n_outer = 1 + rng.randrange(3)
-        n_inner = 1 + rng.randrange(3)
+        n_outer = TEETH_MIN + rng.randrange(span)
+        n_inner = TEETH_MIN + rng.randrange(span)
         picked = []
         while len(picked) < n_outer + n_inner:
             slot = rng.randrange(slots)

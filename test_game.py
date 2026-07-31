@@ -3,6 +3,8 @@ import unittest
 from itertools import product
 
 from game import (
+    TEETH_MAX,
+    TEETH_MIN,
     Game,
     Machine,
     default_machine,
@@ -167,8 +169,8 @@ class RandomMachineTest(unittest.TestCase):
                 for gap in range(rings - 1):
                     outer = m.outer_teeth[gap]
                     inner = m.inner_teeth[gap + 1]
-                    self.assertTrue(1 <= len(outer) <= 3)
-                    self.assertTrue(1 <= len(inner) <= 3)
+                    self.assertTrue(TEETH_MIN <= len(outer) <= TEETH_MAX)
+                    self.assertTrue(TEETH_MIN <= len(inner) <= TEETH_MAX)
                     combined = outer + inner
                     self.assertEqual(
                         len(combined),
