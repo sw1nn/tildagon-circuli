@@ -1,9 +1,11 @@
 import os
 import random
+import struct
 import unittest
 from itertools import product
 
 from game import (
+    CATALOGUE_MAGIC,
     TEETH_MAX,
     TEETH_MIN,
     Game,
@@ -13,6 +15,7 @@ from game import (
     default_machine,
     is_valid,
     random_machine,
+    random_reversible_move,
     reversible_moves,
     start_is_scrambled,
 )
@@ -51,7 +54,8 @@ def solve_distance(machine, start, limit):
 
 
 def load_catalogue(rings):
-    with open(os.path.join(CATALOGUE_DIR, "levels_%d.lvl" % rings), "rb") as f:
+    path = os.path.join(CATALOGUE_DIR, "assets", "levels_%d.lvl" % rings)
+    with open(path, "rb") as f:
         data = f.read()
     slots, file_rings, count = catalogue_info(data)
     puzzles = []
@@ -149,6 +153,13 @@ class DrivenRingInvariantTest(unittest.TestCase):
                         "ring %d driven %+d from %r landed on %d, expected %d"
                         % (ring, direction, state, game.positions[ring], expected),
                     )
+                    # Moves must also preserve physical validity: teeth can
+                    # push each other but never overlap.
+                    self.assertTrue(
+                        is_valid(machine, game.positions),
+                        "ring %d driven %+d from %r produced overlap %r"
+                        % (ring, direction, state, game.positions),
+                    )
 
     def test_default_machine_driven_ring_always_moves_one_slot(self):
         self.assert_driven_ring_moves_one_slot(default_machine())
@@ -209,6 +220,40 @@ class RandomMachineTest(unittest.TestCase):
 ALL_TIERS = (3, 4, 5, 6, 7, 8)
 
 
+def _teeth_mask(teeth):
+    m = 0
+    for t in teeth:
+        m |= 1 << t
+    return m
+
+
+class CatalogueRoundTripTest(unittest.TestCase):
+    def test_shipped_files_reencode_byte_for_byte(self):
+        # Independently re-encode every decoded record using only the format
+        # documentation; any drift between writer and reader shows up here.
+        for rings in ALL_TIERS:
+            path = os.path.join(CATALOGUE_DIR, "assets", "levels_%d.lvl" % rings)
+            with open(path, "rb") as f:
+                data = f.read()
+            slots, file_rings, count = catalogue_info(data)
+            out = [struct.pack("<3sBBH", CATALOGUE_MAGIC, slots, file_rings, count)]
+            for i in range(count):
+                inner, outer, start, dist, split = catalogue_entry(data, i)
+                out.append(struct.pack("<BB", dist, split))
+                out.append(bytes(start))
+                for inn, o in zip(inner, outer):
+                    out.append(struct.pack("<HH", _teeth_mask(inn), _teeth_mask(o)))
+            self.assertEqual(b"".join(out), data, "rings %d" % rings)
+
+    def test_entry_index_is_bounds_checked(self):
+        path = os.path.join(CATALOGUE_DIR, "assets", "levels_3.lvl")
+        with open(path, "rb") as f:
+            data = f.read()
+        _slots, _rings, count = catalogue_info(data)
+        with self.assertRaises(IndexError):
+            catalogue_entry(data, count)
+
+
 class ReversibleChurnTest(unittest.TestCase):
     def test_reversible_churn_preserves_solvability(self):
         # The vortex burst punishes button-mashing with random moves, but
@@ -230,6 +275,45 @@ class ReversibleChurnTest(unittest.TestCase):
                 solve_distance(m, game.positions, p["dist"] + churns),
                 "churned start became unsolvable: %r" % (game.positions,),
             )
+
+    def test_random_reversible_move_matches_reversible_set(self):
+        # The fast picker the burst uses must only ever return moves the
+        # exhaustive enumeration also considers reversible.
+        cat = load_catalogue(4)
+        rng = random.Random(7)
+        for _ in range(10):
+            p = cat["puzzles"][rng.randrange(len(cat["puzzles"]))]
+            m = Machine(p["inner"], p["outer"], cat["slots"])
+            move = random_reversible_move(m, p["start"], rng)
+            self.assertIsNotNone(move)
+            allowed = {(r, d) for r, d, _res in reversible_moves(m, p["start"])}
+            self.assertIn(move, allowed)
+
+    def test_churned_composites_stay_solvable_per_half(self):
+        # Bursts on the 6-8 ring composite tiers: churn with the fast picker,
+        # then verify each independent half can still reach solved.
+        churns = 6
+        for rings in (6, 7, 8):
+            cat = load_catalogue(rings)
+            rng = random.Random(rings * 11)
+            for _ in range(2):
+                p = cat["puzzles"][rng.randrange(len(cat["puzzles"]))]
+                m = Machine(p["inner"], p["outer"], cat["slots"])
+                game = Game(m, p["start"])
+                for _ in range(churns):
+                    move = random_reversible_move(m, game.positions, rng)
+                    self.assertIsNotNone(move)
+                    game.rotate(move[0], move[1])
+                k = p["split"]
+                limit = p["dist"] + churns
+                half_a = Machine(p["inner"][:k], p["outer"][:k], cat["slots"])
+                half_b = Machine(p["inner"][k:], p["outer"][k:], cat["slots"])
+                self.assertIsNotNone(
+                    solve_distance(half_a, game.positions[:k], limit)
+                )
+                self.assertIsNotNone(
+                    solve_distance(half_b, game.positions[k:], limit)
+                )
 
 
 class CatalogueTest(unittest.TestCase):
