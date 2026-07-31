@@ -18,6 +18,7 @@ MAX_RINGS = 5           # progression cap; the 240px display gets cramped above
 R_INNER = 40
 R_OUTER = 100
 TOOTH_RATIO = 0.43      # tooth length as a fraction of ring spacing
+MARKER_LEN = 12         # arc length of the yellow alignment section, px
 
 RING_COLORS = [
     (1.0, 0.35, 0.35),
@@ -306,12 +307,12 @@ class Circuli(app.App):
 
     def _draw_marker(self, ctx, i):
         # Alignment marker (ring-frame offset 0): a yellow section of the ring
-        # itself, half a slot wide. Solved when every section sits under the
-        # dotted target line.
+        # itself, MARKER_LEN px along the arc whatever the radius. Solved when
+        # every section sits under the dotted target line.
         r = self.radii[i]
         p = self.game.positions[i]
         a = _slot_angle(self.machine, p)
-        half = math.pi / self.machine.slots / 2
+        half = MARKER_LEN / (2 * r)
         ctx.rgb(1.0, 0.9, 0.2)
         ctx.line_width = (5 if i == self.selected else 3) + 2
         ctx.begin_path()
