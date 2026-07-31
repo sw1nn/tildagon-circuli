@@ -26,11 +26,12 @@ Each ring has teeth on its inner and outer rims. When a rotating ring's tooth wo
 
 ## Structure
 
-- `game.py` — pure game logic (rings, teeth, the coupling rule). No display or hardware imports, so it runs and tests under plain CPython.
-- `levels_<n>.lvl` — the binary level catalogue for `n` rings: fixed-size records of teeth bitmasks, start position, and exact minimum solve distance (format documented beside the decoder in `game.py`).
-- `tools/generate_catalogue.py` — offline (CPython-only) catalogue generator: exhaustively distance-maps random machines by reverse breadth-first search and harvests the hardest properly-scrambled starts. Regenerate with `just gen-levels [seed]`.
-- `test_game.py` — unit tests for the logic and the shipped catalogue: `python -m unittest test_game`.
-- `app.py` — the `Circuli` app: input handling, `ctx` rendering, LEDs/sound.
+- `game.py` — pure game logic (rings, teeth, the coupling rule) and the catalogue decoder. No display or hardware imports, so it runs and tests under plain CPython.
+- `motion.py` — pure MOTU input logic: the flick detector that turns gyro samples into ring turns and selection steps.
+- `assets/levels_<n>.lvl` — the binary level catalogue for `n` rings: fixed-size records of teeth bitmasks, start position, and exact minimum solve distance (format documented beside the decoder in `game.py`).
+- `tools/generate_catalogue.py` — offline (CPython-only) catalogue generator: exhaustively distance-maps random machines by reverse breadth-first search and harvests the hardest properly-scrambled starts. Regenerate with `just gen-levels` (or `python tools/generate_catalogue.py [seed]`).
+- `test_game.py` / `test_motion.py` — unit tests for the logic, the shipped catalogue, and the motion input: `just test` (or `python -m unittest test_game test_motion`).
+- `app.py` — the `Circuli` app: input handling, `ctx` rendering, LEDs.
 - `metadata.json` / `__init__.py` — Tildagon app metadata and entry point.
 
 ## The name
@@ -38,10 +39,3 @@ Each ring has teeth on its inner and outer rims. When a rotating ring's tooth wo
 *Circuli* is Latin — the plural of *circulus*, "small circle" or "ring" — and the victory screen's CIRCULI COMPLETI is elliptical dog-Latin for "the rings are complete". A proper Roman would probably have written *circuli perfecti*; corrections from passing classicists are welcome and will be graded.
 
 A note for Italian players: yes, we know the name appears to contain *culi*, and that the victory screen can therefore be read as proudly announcing "complete arses". This was entirely unintentional, may nevertheless be the most honest review this puzzle will ever receive, and we apologise for absolutely nothing. *Buona fortuna.*
-
-## Developing
-
-From the `spaceagon` environment:
-
-- `just sim` — run in the simulator; pick **Circuli** from the app list.
-- `just deploy` — install onto a USB-connected badge.
