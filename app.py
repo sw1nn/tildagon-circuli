@@ -40,11 +40,28 @@ HINT_R = 115
 
 LED_COUNT = 12
 LED_TALLY_COLOR = (255, 210, 40)  # steady tally, one LED per solve
-LED_CYCLE_COLOR = (40, 220, 60)   # victory sweep colour
 LED_CYCLE_STEP_MS = 120           # sweep speed; full cycle ~1.7s with the beat
 
 # Victory arpeggio, one note as every third LED lights during the sweep.
 VICTORY_NOTES = ("C5", "E5", "G5", "C6")
+
+
+def _led_wheel(i, n=LED_COUNT):
+    """Rainbow colour for LED i of n: hue i/n around the colour wheel."""
+    h = (i % n) * 6.0 / n
+    sector = int(h)
+    x = int(255 * (h - sector))
+    if sector == 0:
+        return (255, x, 0)
+    if sector == 1:
+        return (255 - x, 255, 0)
+    if sector == 2:
+        return (0, 255, x)
+    if sector == 3:
+        return (0, 255 - x, 255)
+    if sector == 4:
+        return (x, 0, 255)
+    return (255, 0, 255 - x)
 
 
 def _slot_angle(machine, v):
@@ -211,8 +228,8 @@ class Circuli(app.App):
         tildagonos.leds.write()
 
     def _advance_win_cycle(self, delta):
-        # Victory sweep: fill the LEDs once around the hexagon, hold a beat,
-        # then advance to the next level automatically.
+        # Victory sweep: paint the LEDs rainbow once around the hexagon, hold
+        # a beat, then advance to the next level automatically.
         self._cycle_ms += delta
         step = int(self._cycle_ms // LED_CYCLE_STEP_MS)
         if step > LED_COUNT + 2:
@@ -226,7 +243,7 @@ class Circuli(app.App):
                 self._ensure_audio()
                 self._play_note(VICTORY_NOTES[lit // 3])
             for i in range(1, LED_COUNT + 1):
-                tildagonos.leds[i] = LED_CYCLE_COLOR if i <= lit else (0, 0, 0)
+                tildagonos.leds[i] = _led_wheel(i - 1) if i <= lit else (0, 0, 0)
             tildagonos.leds.write()
 
     def _engaged_teeth(self):
