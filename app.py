@@ -43,6 +43,9 @@ LED_TALLY_COLOR = (255, 210, 40)  # steady tally, one LED per solve
 LED_CYCLE_COLOR = (40, 220, 60)   # victory sweep colour
 LED_CYCLE_STEP_MS = 120           # sweep speed; full cycle ~1.7s with the beat
 
+# Victory arpeggio, one note as every third LED lights during the sweep.
+VICTORY_NOTES = ("C5", "E5", "G5", "C6")
+
 
 def _slot_angle(machine, v):
     """Absolute slot value -> screen angle, with slot 0 at the top and CW = +."""
@@ -85,6 +88,7 @@ class Circuli(app.App):
         self._leds_active = False
         self._cycle_ms = 0
         self._cycle_lit = -1
+        self._synth = None
         self._new_puzzle()
 
     def _layout(self):
@@ -175,6 +179,30 @@ class Circuli(app.App):
             self._cycle_lit = -1
         return True
 
+    def _ensure_audio(self):
+        # Lazily build a synth voice. Audio must never take the game down, so
+        # any failure (no speaker, bl00mbox API drift) marks the synth broken
+        # and the tune simply doesn't play.
+        if self._synth is not None:
+            return
+        try:
+            import bl00mbox
+
+            self._blm = bl00mbox.Channel("Circuli")
+            self._synth = self._blm.new(bl00mbox.patches.tinysynth)
+            self._synth.signals.output = self._blm.mixer
+        except Exception:
+            self._synth = False
+
+    def _play_note(self, name):
+        if not self._synth:
+            return
+        try:
+            self._synth.signals.pitch.tone = name
+            self._synth.signals.trigger.start()
+        except Exception:
+            self._synth = False
+
     def _show_tally(self):
         # Steady display: one lit LED per puzzle solved this session.
         lit = min(self.solve_count, LED_COUNT)
@@ -194,6 +222,9 @@ class Circuli(app.App):
         lit = min(step, LED_COUNT)
         if lit != self._cycle_lit:
             self._cycle_lit = lit
+            if lit < LED_COUNT and lit % 3 == 0:
+                self._ensure_audio()
+                self._play_note(VICTORY_NOTES[lit // 3])
             for i in range(1, LED_COUNT + 1):
                 tildagonos.leds[i] = LED_CYCLE_COLOR if i <= lit else (0, 0, 0)
             tildagonos.leds.write()

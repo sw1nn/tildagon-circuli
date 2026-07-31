@@ -8,7 +8,8 @@ at the top to solve it.
 Every puzzle has a freshly randomised teeth layout (3–5 teeth per rim on each
 gap between rings), scrambled by a random walk that is solvable by
 construction. You start at 3 rings; solving a puzzle sweeps the badge LEDs
-once around the hexagon and then automatically advances to the next level,
+once around the hexagon to a short victory arpeggio, then automatically
+advances to the next level,
 up to 5 rings. The LEDs then show a steady tally — one lit LED per puzzle
 solved this session. Progress resets when the app restarts. Dim glyphs at
 the display edge remind you what the game buttons do.
