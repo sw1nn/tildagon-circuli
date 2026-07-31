@@ -5,11 +5,13 @@ badge. Concentric rings carry interlocking teeth; rotating one ring can catch
 and drag its neighbours. Line up every ring's alignment marker with the target
 at the top to solve it.
 
-Every puzzle has a freshly randomised teeth layout (1–3 teeth per rim on each
+Every puzzle has a freshly randomised teeth layout (3–5 teeth per rim on each
 gap between rings), scrambled by a random walk that is solvable by
-construction. You start at 3 rings; each solved puzzle adds a ring, up to 5.
-Progress resets when the app restarts. Dim glyphs at the display edge remind
-you what the game buttons do.
+construction. You start at 3 rings; solving a puzzle sweeps the badge LEDs
+once around the hexagon and then automatically advances to the next level,
+up to 5 rings. The LEDs then show a steady tally — one lit LED per puzzle
+solved this session. Progress resets when the app restarts. Dim glyphs at
+the display edge remind you what the game buttons do.
 
 ## Controls
 
@@ -18,7 +20,7 @@ you what the game buttons do.
 | C (bottom-right) | Rotate the selected ring clockwise |
 | E (bottom-left) | Rotate the selected ring anticlockwise |
 | A / D (top / bottom) | Select the next ring outward / inward |
-| B (top-right) | New puzzle — advances to the next level on a solved board; asks for confirmation mid-game |
+| B (top-right) | New puzzle — skips the victory sweep on a solved board; asks for confirmation mid-game |
 | F (top-left) | Exit to launcher |
 
 In the new-puzzle confirmation, C answers **Yes** and F answers **No**, as

@@ -5,6 +5,9 @@ import time
 import app
 from app_components import YesNoDialog
 from events.input import Buttons, BUTTON_TYPES
+from system.eventbus import eventbus
+from system.patterndisplay.events import PatternDisable, PatternEnable
+from tildagonos import tildagonos
 
 from .game import Game, random_machine
 
@@ -34,6 +37,11 @@ ENGAGED_COLOR = (1.0, 1.0, 1.0)  # teeth currently catching an opposing tooth
 
 HINT_COLOR = (0.45, 0.45, 0.45)  # edge glyphs reminding what the keys do
 HINT_R = 115
+
+LED_COUNT = 12
+LED_TALLY_COLOR = (255, 210, 40)  # steady tally, one LED per solve
+LED_CYCLE_COLOR = (40, 220, 60)   # victory sweep colour
+LED_CYCLE_STEP_MS = 120           # sweep speed; full cycle ~1.7s with the beat
 
 
 def _slot_angle(machine, v):
@@ -73,6 +81,10 @@ class Circuli(app.App):
         self.t = 0
         self.dialog = None
         self.ring_count = START_RINGS
+        self.solve_count = 0
+        self._leds_active = False
+        self._cycle_ms = 0
+        self._cycle_lit = -1
         self._new_puzzle()
 
     def _layout(self):
@@ -98,10 +110,12 @@ class Circuli(app.App):
         self.solved = False
 
     def _request_new_puzzle(self):
-        # A solved board advances the progression with nothing to lose;
-        # mid-game a scramble throws away progress, so ask first.
+        # A solved board advances the progression with nothing to lose (B
+        # skips the victory sweep); mid-game a scramble throws away progress,
+        # so ask first.
         if self.solved:
             self._new_puzzle(min(self.ring_count + 1, MAX_RINGS))
+            self._show_tally()
             return
         self.dialog = YesNoDialog(
             "New puzzle?",
@@ -121,6 +135,12 @@ class Circuli(app.App):
 
     def update(self, delta):
         self.t += delta
+        if not self._leds_active:
+            # Take the LEDs from the OS pattern on first focus and again
+            # whenever we come back from being minimised.
+            eventbus.emit(PatternDisable())
+            self._show_tally()
+            self._leds_active = True
         if self.dialog is not None:
             # The open dialog owns the buttons; its handlers close it.
             return True
@@ -129,12 +149,15 @@ class Circuli(app.App):
         # bottom-left), matching the rotation direction to the buttons'
         # positions on the hexagon. New-puzzle is on RIGHT (physical B).
         if b.pressed(BUTTON_TYPES["CANCEL"]):
+            eventbus.emit(PatternEnable())
+            self._leds_active = False
             self.minimise()
             return True
         if b.pressed(BUTTON_TYPES["RIGHT"]):
             self._request_new_puzzle()
             return True
         if self.solved:
+            self._advance_win_cycle(delta)
             return True
         n = self.machine.rings
         if b.pressed(BUTTON_TYPES["UP"]):
@@ -147,7 +170,33 @@ class Circuli(app.App):
             self.game.rotate(self.selected, -1)
         if self.game.is_solved():
             self.solved = True
+            self.solve_count += 1
+            self._cycle_ms = 0
+            self._cycle_lit = -1
         return True
+
+    def _show_tally(self):
+        # Steady display: one lit LED per puzzle solved this session.
+        lit = min(self.solve_count, LED_COUNT)
+        for i in range(1, LED_COUNT + 1):
+            tildagonos.leds[i] = LED_TALLY_COLOR if i <= lit else (0, 0, 0)
+        tildagonos.leds.write()
+
+    def _advance_win_cycle(self, delta):
+        # Victory sweep: fill the LEDs once around the hexagon, hold a beat,
+        # then advance to the next level automatically.
+        self._cycle_ms += delta
+        step = int(self._cycle_ms // LED_CYCLE_STEP_MS)
+        if step > LED_COUNT + 2:
+            self._new_puzzle(min(self.ring_count + 1, MAX_RINGS))
+            self._show_tally()
+            return
+        lit = min(step, LED_COUNT)
+        if lit != self._cycle_lit:
+            self._cycle_lit = lit
+            for i in range(1, LED_COUNT + 1):
+                tildagonos.leds[i] = LED_CYCLE_COLOR if i <= lit else (0, 0, 0)
+            tildagonos.leds.write()
 
     def _engaged_teeth(self):
         """Return (engaged_outer, engaged_inner): per-ring sets of tooth
