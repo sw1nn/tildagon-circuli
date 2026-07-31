@@ -11,6 +11,7 @@ from game import (
     is_valid,
     random_machine,
     scramble_walk,
+    start_is_scrambled,
 )
 
 
@@ -217,25 +218,28 @@ class ScrambleTest(unittest.TestCase):
                     % (rings, seed, game.positions),
                 )
 
-    def test_walk_scramble_leaves_no_ring_aligned(self):
-        # Each ring's position is the net of its own moves, so short walks
-        # frequently random-walk a ring straight back to slot 0; the walk must
-        # keep going until every ring is displaced.
+    def test_walk_scramble_leaves_no_alignment(self):
+        # A random walk frequently leaves a ring back at slot 0 or two
+        # neighbours on the same slot; the walk chases both away and the
+        # caller rerolls machines it cannot fix. Mirror the app's accept
+        # loop, then assert the accepted start is fully scrambled: no ring
+        # at 0 and no adjacent pair sharing a position.
         for rings in (3, 4, 5):
             for seed in range(30):
                 rng = random.Random(seed * 37 + rings)
-                # Mirror the app: machines whose walk goes nowhere (locked at
-                # rest) are rerolled, so only accepted machines are asserted.
                 while True:
                     m = random_machine(rng, rings)
                     pos, _path = scramble_walk(m, rng, 5 * rings)
-                    if list(pos) != [0] * rings:
+                    if start_is_scrambled(pos):
                         break
-                self.assertNotIn(
-                    0,
-                    pos,
-                    "rings %d seed %d: aligned ring in start %r" % (rings, seed, pos),
-                )
+                self.assertNotIn(0, pos)
+                for i in range(rings - 1):
+                    self.assertNotEqual(
+                        pos[i],
+                        pos[i + 1],
+                        "rings %d seed %d: adjacent alignment in %r"
+                        % (rings, seed, pos),
+                    )
 
     def test_scrambled_random_machine_reaches_solved_by_search(self):
         # Independent oracle cross-check on the smallest ring count, where

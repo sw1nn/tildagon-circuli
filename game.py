@@ -147,6 +147,30 @@ def _reversible_moves(machine, pos):
     return out
 
 
+def start_is_scrambled(positions):
+    """A start position that actually looks scrambled: no ring aligned to the
+    target (slot 0) and no adjacent pair of rings sharing a position."""
+    if 0 in positions:
+        return False
+    for i in range(len(positions) - 1):
+        if positions[i] == positions[i + 1]:
+            return False
+    return True
+
+
+def _unscrambled_rings(pos):
+    """Rings spoiling start_is_scrambled: at slot 0 or matching a neighbour."""
+    bad = set()
+    for i, p in enumerate(pos):
+        if p == 0:
+            bad.add(i)
+    for i in range(len(pos) - 1):
+        if pos[i] == pos[i + 1]:
+            bad.add(i)
+            bad.add(i + 1)
+    return bad
+
+
 def scramble_walk(machine, rng, moves):
     """Random walk of `moves` reversible turns from solved.
 
@@ -154,24 +178,26 @@ def scramble_walk(machine, rng, moves):
     solvable by construction. Returns (positions, undo_path): applying the
     undo moves in reverse order returns to solved.
 
-    Each ring's position is the net effect of its own moves, so a short walk
-    often random-walks a ring straight back to slot 0. Once the length target
-    is met the walk keeps going until no ring sits aligned, preferring moves
-    that displace still-aligned rings, within the allowance. If a state
-    offers no reversible move at all the walk ends early, and the caller
-    should reroll the machine.
+    A short random walk frequently leaves a ring back on slot 0 or two
+    neighbours on the same slot. Once the length target is met the walk keeps
+    going until start_is_scrambled holds, preferring moves of the offending
+    rings, within the allowance. It can still fail — a state may offer no
+    reversible move, and a tightly coupled pair whose every move drags both
+    can never lose its mutual alignment — so callers reroll the machine when
+    the result is not scrambled.
     """
     pos = tuple([0] * machine.rings)
     undo_path = []
-    allowance = moves + 6 * machine.rings
+    allowance = moves + 8 * machine.rings
     while len(undo_path) < allowance:
-        if len(undo_path) >= moves and 0 not in pos:
+        bad = _unscrambled_rings(pos)
+        if len(undo_path) >= moves and not bad:
             break
         options = _reversible_moves(machine, pos)
         if not options:
             break
         if len(undo_path) >= moves:
-            targeted = [o for o in options if pos[o[0]] == 0]
+            targeted = [o for o in options if o[0] in bad]
             if targeted:
                 options = targeted
         _ring, _d, pos, undo = options[rng.randrange(len(options))]
