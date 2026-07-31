@@ -1,0 +1,4 @@
+# Prose is deliberately unwrapped (one line per paragraph) so terminal
+# renderers like glow reflow it to the viewport; hard 80-column wraps render
+# raggedly there. Line length is therefore not enforced.
+MD013: false
