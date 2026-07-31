@@ -1,79 +1,50 @@
 """Pure MOTU (motion-control) input logic for Circuli.
 
-No hardware imports: app.py feeds IMU samples in and slot/selection steps
-come out, so everything here runs and tests under plain CPython.
+No hardware imports: app.py feeds gyro samples in and steps come out, so
+everything here runs and tests under plain CPython. Both MOTU gestures are
+flicks — a sharp twist about the screen normal turns the selected ring, a
+sharp tilt about the left-right axis steps the selection — detected by the
+same rate ratchet, so slow movement never registers and the badge can be
+repositioned freely between gestures.
 """
 
 
-class GyroDial:
-    """Integrate twist rate (deg/s) about the screen normal into slot steps.
+class FlickDial:
+    """One ring step per sharp twist-and-stop about the screen normal.
 
-    Rates inside the deadband never integrate — instead the accumulator
-    decays toward zero, so gyro noise, bias, and the simulator's constant
-    fake readings cannot add up to a phantom step. Each full slot's worth of
-    accumulated twist emits one step and carries the remainder.
+    A step fires when the twist rate (deg/s) crosses fire_dps in either
+    direction. The dial then stays quiet until the rate has remained inside
+    rearm_dps for quiet_ms — so a flick registers exactly once however long
+    it swings, wrist bounce-back cannot fire a phantom reverse step, and
+    slow movement (repositioning the badge between flicks) never registers
+    at all. The simulator's constant fake gyro sits far below rearm_dps.
     """
 
-    def __init__(self, deg_per_slot=30.0, deadband=10.0, decay=45.0):
-        self.deg_per_slot = deg_per_slot
-        self.deadband = deadband
-        self.decay = decay
-        self.accumulated = 0.0
+    def __init__(self, fire_dps=100.0, rearm_dps=30.0, quiet_ms=150.0):
+        self.fire_dps = fire_dps
+        self.rearm_dps = rearm_dps
+        self.quiet_ms = quiet_ms
+        self._armed = True
+        self._quiet = 0.0
 
     def feed(self, rate, dt_ms):
         """Consume one gyro sample; return -1, 0, or +1 slot steps."""
-        dt = dt_ms / 1000.0
-        if abs(rate) < self.deadband:
-            if self.accumulated > 0:
-                self.accumulated = max(0.0, self.accumulated - self.decay * dt)
-            else:
-                self.accumulated = min(0.0, self.accumulated + self.decay * dt)
-            return 0
-        self.accumulated += rate * dt
-        if self.accumulated >= self.deg_per_slot:
-            self.accumulated -= self.deg_per_slot
-            return 1
-        if self.accumulated <= -self.deg_per_slot:
-            self.accumulated += self.deg_per_slot
-            return -1
-        return 0
-
-
-class TiltRatchet:
-    """One selection step per deliberate tilt, with hysteresis.
-
-    Tilt is measured relative to a baseline captured on the first sample, so
-    any holding posture (flat on a table, upright on a lanyard) is 'level'.
-    The baseline re-adapts slowly, but only while the badge is near level and
-    the ratchet is armed, so posture drift is absorbed without eating
-    deliberate tilts. Fires when relative pitch crosses fire_deg, then stays
-    quiet until the badge returns within rearm_deg of the baseline — holding
-    a tilt selects exactly once and threshold wobble cannot repeat-fire.
-    """
-
-    def __init__(self, fire_deg=20.0, rearm_deg=10.0, adapt_ms=4000.0):
-        self.fire_deg = fire_deg
-        self.rearm_deg = rearm_deg
-        self.adapt_ms = adapt_ms
-        self.baseline = None
-        self._armed = True
-
-    def feed(self, pitch_deg, dt_ms=0.0):
-        """Consume one pitch sample (degrees); return -1, 0, or +1 steps."""
-        if self.baseline is None:
-            self.baseline = pitch_deg
-            return 0
-        rel = pitch_deg - self.baseline
-        rel = ((rel + 180.0) % 360.0) - 180.0
         if self._armed:
-            if rel >= self.fire_deg:
+            if rate >= self.fire_dps:
                 self._armed = False
+                self._quiet = 0.0
                 return 1
-            if rel <= -self.fire_deg:
+            if rate <= -self.fire_dps:
                 self._armed = False
+                self._quiet = 0.0
                 return -1
-            if abs(rel) <= self.rearm_deg and self.adapt_ms > 0:
-                self.baseline += rel * min(1.0, dt_ms / self.adapt_ms)
-        elif abs(rel) <= self.rearm_deg:
-            self._armed = True
+            return 0
+        if abs(rate) <= self.rearm_dps:
+            self._quiet += dt_ms
+            if self._quiet >= self.quiet_ms:
+                self._armed = True
+        else:
+            self._quiet = 0.0
         return 0
+
+

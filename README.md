@@ -4,7 +4,7 @@ A ring puzzle for the [Tildagon](https://github.com/emfcamp/badge-2024-software)
 
 Puzzles come from a pre-generated level catalogue: random teeth layouts whose solvability and exact minimum solve distance are verified offline by exhaustive search (see `tools/generate_catalogue.py`), so every start is guaranteed solvable and properly hard for its tier. You start at 3 rings; solving a puzzle sweeps the badge LEDs once around the hexagon, then automatically advances to the next level, up to 8 rings. The LEDs then show a steady tally — one lit LED per puzzle solved this session. Progress resets when the app restarts. Glyphs on tabs at the display edge remind you what the game buttons do.
 
-An instruction page opens when the app starts and doubles as the control chooser: **C** plays with buttons, **E** plays *MOTU* — twist the badge like a dial to turn the selected ring (30° per slot) and tilt it away/toward you to select rings. Buttons stay live in MOTU mode as backup.
+An instruction page opens when the app starts, followed by a control chooser: **C** plays with buttons, **E** plays *MOTU* — flick the badge sharply like a dial to turn the selected ring one slot, and tilt-flick it away/toward you to select rings. Slow movements never register, so you can reposition the badge freely between flicks. Buttons stay live in MOTU mode as backup.
 
 Something lives in the gap at the centre of the rings. Players who lean on the same button will meet it. Don't make it angry.
 

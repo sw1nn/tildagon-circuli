@@ -10,7 +10,7 @@ from system.patterndisplay.events import PatternDisable, PatternEnable
 from tildagonos import tildagonos
 
 from .game import Game, Machine, catalogue_entry, catalogue_info, reversible_moves
-from .motion import GyroDial, TiltRatchet
+from .motion import FlickDial
 
 try:
     import imu
@@ -61,18 +61,15 @@ LED_CYCLE_STEP_MS = 120           # sweep speed; full cycle ~1.7s with the beat
 # latch, and reversibility keeps the mess provably solvable).
 OMINOUS_LIMIT = 8       # same-move presses before the burst
 
-# MOTU (motion controls): twist the badge to turn the selected ring, tilt
-# away/toward to select. Axis mapping calibrated on hardware (2026-07-31):
-# accel z (+9.8 face-up) is the screen normal, player-clockwise twist reads
-# negative on gyro z, and tilting the top edge away reads positive on
-# accel x. Tilt is ratcheted relative to a baseline captured at mode start,
-# so any holding posture counts as level.
+# MOTU (motion controls): both gestures are sharp flicks read from the gyro
+# alone, so holding posture never matters. Twist axis calibrated on hardware
+# (2026-07-31): player-clockwise flick reads negative on gyro z. The tilt
+# flick (top edge away/toward) rotates about the left-right axis, gyro y;
+# its sign is calibrated the same way.
 MOTU_TWIST_AXIS = 2     # gyro axis about the screen normal
 MOTU_TWIST_SIGN = -1
-MOTU_PITCH_AXIS = 0     # accel axis that swings when the top edge tilts
-MOTU_PITCH_SIGN = 1
-MOTU_NORMAL_AXIS = 2    # accel axis out of the screen
-MOTU_NORMAL_SIGN = 1
+MOTU_TILT_AXIS = 1      # gyro axis for top-edge away/toward flicks
+MOTU_TILT_SIGN = 1      # calibrated: away-flick reads positive (select out)
 OMINOUS_VISIBLE = 2     # presses before the vortex starts to show
 BURST_MOVES = 6         # churn moves per burst
 BURST_STEP_MS = 90      # churn speed, one move per step
@@ -133,10 +130,10 @@ class Circuli(app.App):
         random.seed(time.ticks_ms())
         self.t = 0
         self.dialog = None
-        self.help_open = True  # instruction page doubles as mode chooser
+        self.page = "help"  # launch flow: help -> mode chooser -> game
         self.motu = False
-        self._dial = None
-        self._ratchet = None
+        self._twist = None
+        self._tilt = None
         self.ring_count = START_RINGS
         self._catalogues = {}
         self.solve_count = 0
@@ -274,9 +271,22 @@ class Circuli(app.App):
             # The vortex is churning; input waits until it is spent.
             self._advance_burst(delta)
             return True
-        if self.help_open:
-            # The help page is also the mode chooser: C plays with buttons,
-            # E plays MOTU (twist and tilt; buttons stay live as backup).
+        if self.page == "help":
+            b = self.button_states
+            if b.pressed(BUTTON_TYPES["CANCEL"]):
+                eventbus.emit(PatternEnable())
+                self._leds_active = False
+                self.minimise()
+                return True
+            for name in ("CONFIRM", "UP", "DOWN", "LEFT", "RIGHT"):
+                if b.pressed(BUTTON_TYPES[name]):
+                    self.page = "mode"
+                    self.button_states.clear()
+                    break
+            return True
+        if self.page == "mode":
+            # Dedicated chooser page: C plays with buttons, E plays MOTU
+            # (flick gestures; buttons stay live as backup).
             b = self.button_states
             if b.pressed(BUTTON_TYPES["CANCEL"]):
                 eventbus.emit(PatternEnable())
@@ -285,13 +295,17 @@ class Circuli(app.App):
                 return True
             if b.pressed(BUTTON_TYPES["CONFIRM"]):
                 self.motu = False
-                self.help_open = False
+                self.page = None
                 self.button_states.clear()
             elif b.pressed(BUTTON_TYPES["LEFT"]) and imu is not None:
                 self.motu = True
-                self._dial = GyroDial()
-                self._ratchet = TiltRatchet()
-                self.help_open = False
+                self._twist = FlickDial()
+                # Tilt is a flick-AND-RETURN gesture: measured returns swing
+                # to ~-360 deg/s, so a higher fire threshold plus a long
+                # quiet time keep the return stroke from firing a reverse
+                # step (calibrated flicks run 300-900 deg/s).
+                self._tilt = FlickDial(fire_dps=150.0, rearm_dps=40.0, quiet_ms=400.0)
+                self.page = None
                 self.button_states.clear()
             return True
         b = self.button_states
@@ -330,23 +344,16 @@ class Circuli(app.App):
         return True
 
     def _update_motu(self, delta):
-        # Twist about the screen normal turns the selected ring; the vortex
-        # counts gyro slots exactly like button presses, so cranking in one
-        # direction is punished the same as mashing.
+        # A sharp twist flick turns the selected ring; the vortex counts
+        # flicks exactly like button presses, so repeat-flicking one way is
+        # punished the same as mashing. A sharp tilt flick (top edge
+        # away/toward) steps the selection outward/inward.
         gyro = imu.gyro_read()
-        step = self._dial.feed(gyro[MOTU_TWIST_AXIS] * MOTU_TWIST_SIGN, delta)
+        step = self._twist.feed(gyro[MOTU_TWIST_AXIS] * MOTU_TWIST_SIGN, delta)
         if step:
             if self._register_rotate(step):
                 self.game.rotate(self.selected, step)
-        # Pitch (tilt away/toward) ratchets the ring selection.
-        acc = imu.acc_read()
-        pitch = math.degrees(
-            math.atan2(
-                acc[MOTU_PITCH_AXIS] * MOTU_PITCH_SIGN,
-                acc[MOTU_NORMAL_AXIS] * MOTU_NORMAL_SIGN,
-            )
-        )
-        moved = self._ratchet.feed(pitch, delta)
+        moved = self._tilt.feed(gyro[MOTU_TILT_AXIS] * MOTU_TILT_SIGN, delta)
         if moved:
             self.selected = (self.selected + moved) % self.machine.rings
             self._calm_vortex()
@@ -397,8 +404,12 @@ class Circuli(app.App):
     def draw(self, ctx):
         ctx.save()
         ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
-        if self.help_open:
+        if self.page == "help":
             self._draw_help(ctx)
+            ctx.restore()
+            return
+        if self.page == "mode":
+            self._draw_mode(ctx)
             ctx.restore()
             return
         self._draw_top_reference(ctx)
@@ -486,13 +497,47 @@ class Circuli(app.App):
         ctx.rgb(0.45, 0.45, 0.45)
         ctx.font_size = 12
         ctx.begin_path()
-        ctx.move_to(0, 86)
-        ctx.text("MOTU = twist & tilt")
-        ctx.rgb(0.9, 0.9, 0.9)
-        ctx.font_size = 13
+        ctx.move_to(0, 92)
+        ctx.text("press any key")
+
+    def _draw_mode(self, ctx):
+        # Dedicated control-scheme chooser, shown after the instructions.
+        # Latin to match the theme (both ablatives: "by keys" / "by motion").
+        ctx.text_align = ctx.CENTER
+        ctx.text_baseline = ctx.MIDDLE
+        ctx.rgb(1.0, 0.9, 0.2)
+        ctx.font_size = 22
         ctx.begin_path()
-        ctx.move_to(0, 100)
-        ctx.text("C buttons  E MOTU")
+        ctx.move_to(0, -70)
+        ctx.text("ELIGE MODUM")
+        ctx.rgb(0.55, 0.55, 0.55)
+        ctx.font_size = 12
+        ctx.begin_path()
+        ctx.move_to(0, -50)
+        ctx.text("(choose controls)")
+        ctx.rgb(1.0, 1.0, 1.0)
+        ctx.font_size = 16
+        ctx.begin_path()
+        ctx.move_to(0, -16)
+        ctx.text("C   CLAVIBUS (buttons)")
+        ctx.begin_path()
+        ctx.move_to(0, 14)
+        ctx.text("E   MOTU (flick & tilt)")
+        ctx.rgb(0.7, 0.7, 0.7)
+        ctx.font_size = 13
+        motu_lines = (
+            "flick the badge to turn,",
+            "tilt-flick to select a ring",
+        )
+        for i, line in enumerate(motu_lines):
+            ctx.begin_path()
+            ctx.move_to(0, 40 + i * 15)
+            ctx.text(line)
+        ctx.rgb(0.45, 0.45, 0.45)
+        ctx.font_size = 12
+        ctx.begin_path()
+        ctx.move_to(0, 78)
+        ctx.text("buttons work in MOTU too")
 
     def _draw_vortex(self, ctx):
         # Something ominous in the centre gap. It grows with each repeated
