@@ -5,21 +5,28 @@ For each ring count, random machines are exhaustively distance-mapped by
 reverse breadth-first search over the real move graph (moves are not
 invertible, so solvability cannot be assumed from reversibility). The
 hardest properly-scrambled starts are harvested with their exact minimum
-solve distance and written to levels_<rings>.json next to the app code.
+solve distance and written to binary levels_<rings>.lvl files next to the
+app code (format documented alongside the decoder in game.py).
 
 Usage: python tools/generate_catalogue.py [seed]
 """
 
-import json
 import os
 import random
+import struct
 import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import game
-from game import _apply, is_valid, random_machine, start_is_scrambled
+from game import (
+    CATALOGUE_MAGIC,
+    _apply,
+    is_valid,
+    random_machine,
+    start_is_scrambled,
+)
 
 # Per ring count: puzzles wanted, max starts taken per machine, minimum
 # acceptable solve distance, a cap on machines tried, and the teeth-density
@@ -49,6 +56,17 @@ PLAN = {
         "machine_cap": 150,
         "densities": [(2, 3), (2, 4)],
     },
+}
+
+# Ring counts beyond exhaustive reach (12^n states) are COMPOSITES: two base
+# puzzles spliced at a boundary gap that carries teeth on the inner side only,
+# so the halves never interact and the minimum solve distance is exactly the
+# sum of the halves' verified distances. "split" records the boundary for
+# re-verification.
+COMPOSITE_PLAN = {
+    6: {"want": 36, "halves": (3, 3)},
+    7: {"want": 24, "halves": (4, 3)},
+    8: {"want": 24, "halves": (4, 4)},
 }
 
 
@@ -159,21 +177,83 @@ def generate(rings, plan, rng):
     return puzzles[: plan["want"]]
 
 
+def _mask(teeth):
+    m = 0
+    for t in teeth:
+        m |= 1 << t
+    return m
+
+
+def compose(entry_a, entry_b, rng, slots=12):
+    """Splice two base puzzles; half A's outermost rim gets decorative teeth
+    (its partner rim is empty, so the halves never couple) and the composite
+    distance is exactly the sum of the halves'."""
+    inner = [list(t) for t in entry_a["inner"]] + [list(t) for t in entry_b["inner"]]
+    outer = [list(t) for t in entry_a["outer"]] + [list(t) for t in entry_b["outer"]]
+    k = len(entry_a["inner"])
+    teeth = []
+    while len(teeth) < 2 + rng.randrange(3):
+        slot = rng.randrange(slots)
+        if slot not in teeth:
+            teeth.append(slot)
+    outer[k - 1] = sorted(teeth)
+    return {
+        "inner": inner,
+        "outer": outer,
+        "start": list(entry_a["start"]) + list(entry_b["start"]),
+        "dist": entry_a["dist"] + entry_b["dist"],
+        "split": k,
+    }
+
+
+def compose_tier(plan, pools, rng):
+    a_n, b_n = plan["halves"]
+    pool_a, pool_b = pools[a_n], pools[b_n]
+    puzzles = []
+    seen = set()
+    attempts = 0
+    while len(puzzles) < plan["want"] and attempts < plan["want"] * 50:
+        attempts += 1
+        ia = rng.randrange(len(pool_a))
+        ib = rng.randrange(len(pool_b))
+        if a_n == b_n and ia == ib:
+            continue
+        if (ia, ib) in seen:
+            continue
+        pa, pb = pool_a[ia], pool_b[ib]
+        # The boundary is the only place the splice could break
+        # start_is_scrambled: both halves are already fully scrambled.
+        if pa["start"][-1] == pb["start"][0]:
+            continue
+        seen.add((ia, ib))
+        puzzles.append(compose(pa, pb, rng))
+    return puzzles
+
+
 def main():
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else 2026
     rng = random.Random(seed)
     out_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     failed = []
+    pools = {}
     for rings, plan in PLAN.items():
-        puzzles = generate(rings, plan, rng)
+        pools[rings] = generate(rings, plan, rng)
+    for rings, plan in COMPOSITE_PLAN.items():
+        pools[rings] = compose_tier(plan, pools, rng)
+    for rings, puzzles in pools.items():
         if not puzzles:
             failed.append(rings)
             print(f"rings {rings}: NO puzzles found — file not written", flush=True)
             continue
         dists = sorted(p["dist"] for p in puzzles)
-        path = os.path.join(out_dir, f"levels_{rings}.json")
-        with open(path, "w") as f:
-            json.dump({"slots": 12, "rings": rings, "puzzles": puzzles}, f)
+        path = os.path.join(out_dir, f"levels_{rings}.lvl")
+        with open(path, "wb") as f:
+            f.write(struct.pack("<3sBBH", CATALOGUE_MAGIC, 12, rings, len(puzzles)))
+            for p in puzzles:
+                f.write(struct.pack("<BB", p["dist"], p.get("split", 0)))
+                f.write(bytes(p["start"]))
+                for inner, outer in zip(p["inner"], p["outer"]):
+                    f.write(struct.pack("<HH", _mask(inner), _mask(outer)))
         print(
             f"rings {rings}: wrote {len(puzzles)} puzzles, dist "
             f"min {dists[0]} median {dists[len(dists) // 2]} max {dists[-1]} "

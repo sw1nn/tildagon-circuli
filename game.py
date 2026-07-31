@@ -4,6 +4,8 @@ No display or hardware imports here, so it runs and tests under plain CPython as
 well as on-badge MicroPython. Rendering and input live in app.py.
 """
 
+import struct
+
 
 class Machine:
     """A fixed 'safe': concentric rings with teeth at fixed ring-frame slot offsets.
@@ -125,6 +127,46 @@ def start_is_scrambled(positions):
             return False
     return True
 
+
+
+# Binary level catalogue (written by tools/generate_catalogue.py):
+# header "CL1" + slots(1B) + rings(1B) + count(2B LE), then fixed-size
+# records of dist(1B) + split(1B, 0 = not a composite) + one start byte per
+# ring + per ring a little-endian 16-bit teeth bitmask for the inner and
+# outer rims. Fixed records allow random access without parsing the file.
+CATALOGUE_MAGIC = b"CL1"
+_CATALOGUE_HEADER = struct.calcsize("<3sBBH")
+
+
+def catalogue_info(data):
+    """(slots, rings, puzzle_count) of a binary catalogue blob."""
+    magic, slots, rings, count = struct.unpack_from("<3sBBH", data, 0)
+    if magic != CATALOGUE_MAGIC:
+        raise ValueError("not a level catalogue")
+    return slots, rings, count
+
+
+def _mask_teeth(mask, slots):
+    return [s for s in range(slots) if (mask >> s) & 1]
+
+
+def catalogue_entry(data, index):
+    """Decode puzzle `index`: (inner_teeth, outer_teeth, start, dist, split)."""
+    slots, rings, count = catalogue_info(data)
+    record = 2 + 5 * rings
+    off = _CATALOGUE_HEADER + index * record
+    dist = data[off]
+    split = data[off + 1]
+    start = list(data[off + 2 : off + 2 + rings])
+    inner = []
+    outer = []
+    pos = off + 2 + rings
+    for _ in range(rings):
+        inner_mask, outer_mask = struct.unpack_from("<HH", data, pos)
+        inner.append(_mask_teeth(inner_mask, slots))
+        outer.append(_mask_teeth(outer_mask, slots))
+        pos += 4
+    return inner, outer, start, dist, split
 
 
 class Game:

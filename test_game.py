@@ -1,4 +1,3 @@
-import json
 import os
 import random
 import unittest
@@ -9,6 +8,8 @@ from game import (
     TEETH_MIN,
     Game,
     Machine,
+    catalogue_entry,
+    catalogue_info,
     default_machine,
     is_valid,
     random_machine,
@@ -49,8 +50,17 @@ def solve_distance(machine, start, limit):
 
 
 def load_catalogue(rings):
-    with open(os.path.join(CATALOGUE_DIR, "levels_%d.json" % rings)) as f:
-        return json.load(f)
+    with open(os.path.join(CATALOGUE_DIR, "levels_%d.lvl" % rings), "rb") as f:
+        data = f.read()
+    slots, file_rings, count = catalogue_info(data)
+    puzzles = []
+    for i in range(count):
+        inner, outer, start, dist, split = catalogue_entry(data, i)
+        entry = {"inner": inner, "outer": outer, "start": start, "dist": dist}
+        if split:
+            entry["split"] = split
+        puzzles.append(entry)
+    return {"slots": slots, "rings": file_rings, "puzzles": puzzles}
 
 
 def all_valid_states(machine):
@@ -195,9 +205,12 @@ class RandomMachineTest(unittest.TestCase):
                         self.assertTrue(0 <= t < m.slots)
 
 
+ALL_TIERS = (3, 4, 5, 6, 7, 8)
+
+
 class CatalogueTest(unittest.TestCase):
     def test_catalogue_entries_are_valid_and_scrambled(self):
-        for rings in (3, 4, 5):
+        for rings in ALL_TIERS:
             cat = load_catalogue(rings)
             self.assertEqual(cat["rings"], rings)
             self.assertTrue(cat["puzzles"])
@@ -208,6 +221,34 @@ class CatalogueTest(unittest.TestCase):
                 self.assertTrue(is_valid(m, p["start"]))
                 self.assertTrue(start_is_scrambled(p["start"]))
                 self.assertGreater(p["dist"], 0)
+
+    def test_composite_entries_have_decoupled_boundaries(self):
+        # A composite's halves must not interact: the first ring of half B
+        # carries no inner teeth, so nothing meshes across the boundary and
+        # the summed distance stays exact.
+        for rings in (6, 7, 8):
+            cat = load_catalogue(rings)
+            for p in cat["puzzles"]:
+                k = p["split"]
+                self.assertEqual(p["inner"][k], [])
+                self.assertTrue(p["outer"][k - 1])
+
+    def test_composite_distances_are_the_sum_of_their_halves(self):
+        # Spot-check per composite tier: BFS-verify each half's distance and
+        # confirm the recorded distance is exactly their sum.
+        for rings in (6, 7, 8):
+            cat = load_catalogue(rings)
+            rng = random.Random(rings)
+            for _ in range(3):
+                p = cat["puzzles"][rng.randrange(len(cat["puzzles"]))]
+                k = p["split"]
+                half_a = Machine(p["inner"][:k], p["outer"][:k], cat["slots"])
+                half_b = Machine(p["inner"][k:], p["outer"][k:], cat["slots"])
+                da = solve_distance(half_a, p["start"][:k], p["dist"])
+                self.assertIsNotNone(da)
+                db = solve_distance(half_b, p["start"][k:], p["dist"] - da)
+                self.assertIsNotNone(db)
+                self.assertEqual(da + db, p["dist"])
 
     def test_catalogue_distances_are_exact_for_three_rings(self):
         # Every shipped 3-ring puzzle re-verified against the BFS oracle.
