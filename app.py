@@ -40,7 +40,7 @@ HINT_COLOR = (1.0, 1.0, 1.0)  # edge glyphs reminding what the keys do
 HINT_R = 115
 HINT_BG = (0.2, 0.2, 0.2)     # tab behind each glyph
 HINT_TAB_EDGE = 122           # just past the visible screen edge
-HINT_TAB_INNER = 103          # how far the tab pokes into the play area
+HINT_TAB_INNER = 105          # how far the tab pokes into the play area
 HINT_TAB_HALF_W = 19
 HINT_TAB_CORNER = 5
 
@@ -372,7 +372,8 @@ class Circuli(app.App):
     def _hint_arc_arrow(self, ctx, angle, cw):
         # A short arc concentric with the rings, with a filled arrowhead on
         # the end it points along (increasing angle = clockwise on screen).
-        half = math.radians(8)
+        # Short enough that arc plus arrowhead stay within the tab's width.
+        half = math.radians(5)
         ctx.begin_path()
         ctx.arc(0, 0, HINT_R, angle - half, angle + half, False)
         ctx.stroke()
