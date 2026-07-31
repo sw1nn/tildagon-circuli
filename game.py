@@ -16,6 +16,8 @@ class Machine:
     """
 
     def __init__(self, inner_teeth, outer_teeth, slots=12):
+        if len(inner_teeth) != len(outer_teeth):
+            raise ValueError("inner_teeth and outer_teeth must cover the same rings")
         self.inner_teeth = [list(t) for t in inner_teeth]
         self.outer_teeth = [list(t) for t in outer_teeth]
         self.slots = slots
@@ -23,11 +25,12 @@ class Machine:
 
 
 def default_machine():
-    """The fixed safe the game ships with.
+    """A small fixed example machine, used by the tests as a known fixture.
 
     Both shared gaps carry three evenly-spaced teeth, offset so nothing meshes
     at rest (the solved state). The innermost inner tooth and outermost outer
-    tooth have no partner ring, so they are purely decorative.
+    tooth have no partner ring, so they are purely decorative. Shipped puzzles
+    come from the level catalogue instead.
     """
     return Machine(
         inner_teeth=[[6], [2, 6, 10], [3, 7, 11]],
@@ -40,18 +43,18 @@ TEETH_MIN = 3
 TEETH_MAX = 5
 
 
-def random_machine(rng, rings, slots=12):
-    """A random safe: each shared gap gets TEETH_MIN..TEETH_MAX outer and
+def random_machine(rng, rings, slots=12, teeth_min=TEETH_MIN, teeth_max=TEETH_MAX):
+    """A random safe: each shared gap gets teeth_min..teeth_max outer and
     inner teeth at distinct random slots, so nothing overlaps at rest and the
     solved state is valid by construction. The decorative rims (innermost
     inner, outermost outer) stay empty. Uses only rng.randrange, which
     MicroPython provides."""
     inner_teeth = [[] for _ in range(rings)]
     outer_teeth = [[] for _ in range(rings)]
-    span = TEETH_MAX - TEETH_MIN + 1
+    span = teeth_max - teeth_min + 1
     for gap in range(rings - 1):
-        n_outer = TEETH_MIN + rng.randrange(span)
-        n_inner = TEETH_MIN + rng.randrange(span)
+        n_outer = teeth_min + rng.randrange(span)
+        n_inner = teeth_min + rng.randrange(span)
         picked = []
         while len(picked) < n_outer + n_inner:
             slot = rng.randrange(slots)
@@ -128,6 +131,18 @@ def start_is_scrambled(positions):
     return True
 
 
+def _has_single_undo(machine, pos, result, ring, d):
+    """True if some single move maps `result` back to `pos`. The obvious
+    counter-rotation is tried first; drag cascades usually reverse through
+    the same chain, but not always, so all moves are checked."""
+    if _apply(machine, result, ring, -d) == pos:
+        return True
+    for r2 in range(machine.rings):
+        for d2 in (1, -1):
+            if _apply(machine, result, r2, d2) == pos:
+                return True
+    return False
+
 
 def reversible_moves(machine, positions):
     """Every (ring, direction, result) move from `positions` that some single
@@ -143,18 +158,34 @@ def reversible_moves(machine, positions):
     for ring in range(machine.rings):
         for d in (1, -1):
             result = _apply(machine, pos, ring, d)
-            undone = _apply(machine, result, ring, -d) == pos
-            if not undone:
-                for r2 in range(machine.rings):
-                    for d2 in (1, -1):
-                        if _apply(machine, result, r2, d2) == pos:
-                            undone = True
-                            break
-                    if undone:
-                        break
-            if undone:
+            if _has_single_undo(machine, pos, result, ring, d):
                 moves.append((ring, d, result))
     return moves
+
+
+def random_reversible_move(machine, positions, rng):
+    """One uniformly-chosen reversible move as (ring, direction), or None.
+
+    Tries candidate moves in a shuffled order and returns the first that
+    verifies, so the caller pays for roughly one undo-check instead of
+    enumerating the full reversible set — cheap enough for per-frame use on
+    the badge. Distribution is uniform over candidates, which is close
+    enough to uniform over reversible moves for game chaos.
+    """
+    pos = tuple(positions)
+    candidates = []
+    for ring in range(machine.rings):
+        candidates.append((ring, 1))
+        candidates.append((ring, -1))
+    # Fisher-Yates with rng.randrange: MicroPython's random has no shuffle.
+    for i in range(len(candidates) - 1, 0, -1):
+        j = rng.randrange(i + 1)
+        candidates[i], candidates[j] = candidates[j], candidates[i]
+    for ring, d in candidates:
+        result = _apply(machine, pos, ring, d)
+        if _has_single_undo(machine, pos, result, ring, d):
+            return (ring, d)
+    return None
 
 
 # Binary level catalogue (written by tools/generate_catalogue.py):
@@ -181,6 +212,8 @@ def _mask_teeth(mask, slots):
 def catalogue_entry(data, index):
     """Decode puzzle `index`: (inner_teeth, outer_teeth, start, dist, split)."""
     slots, rings, count = catalogue_info(data)
+    if not 0 <= index < count:
+        raise IndexError("catalogue has %d puzzles" % count)
     record = 2 + 5 * rings
     off = _CATALOGUE_HEADER + index * record
     dist = data[off]
@@ -198,6 +231,8 @@ def catalogue_entry(data, index):
 
 
 class Game:
+    """A machine plus the current ring positions: the mutable play state."""
+
     def __init__(self, machine, positions=None):
         self.machine = machine
         if positions is None:
@@ -211,6 +246,7 @@ class Game:
         self.positions = list(_apply(self.machine, self.positions, ring, direction))
 
     def is_solved(self):
+        """True when every ring sits on slot 0, aligned with the target."""
         for p in self.positions:
             if p != 0:
                 return False

@@ -27,6 +27,14 @@ class FlickDial:
         self._armed = True
         self._quiet = 0.0
 
+    def reset(self):
+        """Re-arm immediately. Callers use this across gaps where the dial
+        receives no samples (level changes, animations), because quiet time
+        only accumulates through feed() and an un-armed dial would otherwise
+        swallow the first flick after the gap."""
+        self._armed = True
+        self._quiet = 0.0
+
     def feed(self, rate, dt_ms):
         """Consume one gyro sample; return -1, 0, or +1 slot steps."""
         if self._armed:
@@ -46,5 +54,3 @@ class FlickDial:
         else:
             self._quiet = 0.0
         return 0
-
-

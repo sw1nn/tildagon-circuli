@@ -7,9 +7,10 @@ from app_components import YesNoDialog
 from events.input import Buttons, BUTTON_TYPES
 from system.eventbus import eventbus
 from system.patterndisplay.events import PatternDisable, PatternEnable
+from system.scheduler.events import RequestStopAppEvent
 from tildagonos import tildagonos
 
-from .game import Game, Machine, catalogue_entry, catalogue_info, reversible_moves
+from .game import Game, Machine, catalogue_entry, catalogue_info, random_reversible_move
 from .motion import FlickDial
 
 try:
@@ -60,20 +61,19 @@ LED_CYCLE_STEP_MS = 120           # sweep speed; full cycle ~1.7s with the beat
 # bursts and churns the rings with random reversible moves (teeth still
 # latch, and reversibility keeps the mess provably solvable).
 OMINOUS_LIMIT = 8       # same-move presses before the burst
-
-# MOTU (motion controls): both gestures are sharp flicks read from the gyro
-# alone, so holding posture never matters. Twist axis calibrated on hardware
-# (2026-07-31): player-clockwise flick reads negative on gyro z. The tilt
-# flick (top edge away/toward) rotates about the left-right axis, gyro y;
-# its sign is calibrated the same way.
-MOTU_TWIST_AXIS = 2     # gyro axis about the screen normal
-MOTU_TWIST_SIGN = -1
-MOTU_TILT_AXIS = 1      # gyro axis for top-edge away/toward flicks
-MOTU_TILT_SIGN = 1      # calibrated: away-flick reads positive (select out)
 OMINOUS_VISIBLE = 2     # presses before the vortex starts to show
 BURST_MOVES = 6         # churn moves per burst
 BURST_STEP_MS = 90      # churn speed, one move per step
 LED_BURST_COLOR = (255, 30, 30)
+
+# MOTU (motion controls): both gestures are sharp flicks read from the gyro
+# alone, so holding posture never matters. Axes and signs are calibrated
+# against the badge hardware: player-clockwise flick reads negative on gyro
+# z; a top-edge-away tilt flick reads positive on gyro y.
+MOTU_TWIST_AXIS = 2     # gyro axis about the screen normal
+MOTU_TWIST_SIGN = -1
+MOTU_TILT_AXIS = 1      # gyro axis for top-edge away/toward flicks
+MOTU_TILT_SIGN = 1
 
 
 def _led_wheel(i, n=LED_COUNT):
@@ -94,20 +94,15 @@ def _led_wheel(i, n=LED_COUNT):
     return (255, 0, 255 - x)
 
 
-def _slot_angle(machine, v):
-    """Absolute slot value -> screen angle, with slot 0 at the top and CW = +."""
-    return -math.pi / 2 + v * (2 * math.pi / machine.slots)
-
-
 def _circular_dist(a, b, slots):
     d = (a - b) % slots
     return min(d, slots - d)
 
 
-def _tooth(ctx, r0, r1, angle, half_w):
-    """Fill a gear tooth: a parallel-sided block running radially r0 -> r1,
-    offset a constant `half_w` px either side of the radius line."""
-    ca, sa = math.cos(angle), math.sin(angle)
+def _tooth(ctx, r0, r1, ca, sa, half_w):
+    """Fill a gear tooth: a parallel-sided block running radially r0 -> r1
+    along the direction (ca, sa), offset a constant `half_w` px either side.
+    Takes the direction as cos/sin so callers can use precomputed tables."""
     px, py = -sa * half_w, ca * half_w
     ctx.begin_path()
     ctx.move_to(r0 * ca - px, r0 * sa - py)
@@ -116,8 +111,6 @@ def _tooth(ctx, r0, r1, angle, half_w):
     ctx.line_to(r1 * ca - px, r1 * sa - py)
     ctx.close_path()
     ctx.fill()
-
-
 
 
 class Circuli(app.App):
@@ -140,16 +133,33 @@ class Circuli(app.App):
         self._leds_active = False
         self._cycle_ms = 0
         self._cycle_lit = -1
+        self._engaged = None
+        self._last_pick = {}
+        self._needs_render = True
+        # Hand the LEDs back to the OS pattern however the app ends — a
+        # crash or launcher stop never goes through the minimise paths.
+        eventbus.on(RequestStopAppEvent, self._on_stop, self)
         self._new_puzzle()
 
+    def _on_stop(self, event):
+        if event.app is self and self._leds_active:
+            eventbus.emit(PatternEnable())
+            self._leds_active = False
+
     def _layout(self):
-        """Derive ring geometry from the current ring count."""
+        """Derive ring geometry from the current ring count, and precompute
+        per-slot angles and their cos/sin so the draw loop does no trig for
+        teeth or markers."""
         n = self.ring_count
         spacing = (R_OUTER - R_INNER) / (n - 1)
         self.radii = [R_INNER + i * spacing for i in range(n)]
         self.tooth_len = spacing * TOOTH_RATIO
         self.tooth_half_w = max(2.0, self.tooth_len * 0.35)
         self.ring_stroke = 3 if spacing >= 14 else 2
+        s = self.machine.slots
+        self.slot_angles = [-math.pi / 2 + v * (2 * math.pi / s) for v in range(s)]
+        self.slot_cos = [math.cos(a) for a in self.slot_angles]
+        self.slot_sin = [math.sin(a) for a in self.slot_angles]
 
     def _load_catalogue(self, rings):
         # Levels are generated offline (tools/generate_catalogue.py) with
@@ -158,7 +168,7 @@ class Circuli(app.App):
         # and only the picked record is ever decoded.
         data = self._catalogues.get(rings)
         if data is None:
-            path = __file__.rsplit("/", 1)[0] + "/levels_%d.lvl" % rings
+            path = __file__.rsplit("/", 1)[0] + "/assets/levels_%d.lvl" % rings
             with open(path, "rb") as f:
                 data = f.read()
             self._catalogues[rings] = data
@@ -169,9 +179,13 @@ class Circuli(app.App):
             self.ring_count = ring_count
         data = self._load_catalogue(self.ring_count)
         slots, _rings, count = catalogue_info(data)
-        inner, outer, start, _dist, _split = catalogue_entry(
-            data, random.randrange(count)
-        )
+        pick = random.randrange(count)
+        last = self._last_pick.get(self.ring_count)
+        if count > 1 and pick == last:
+            # Re-pick uniformly among the others: no back-to-back repeats.
+            pick = (pick + 1 + random.randrange(count - 1)) % count
+        self._last_pick[self.ring_count] = pick
+        inner, outer, start, _dist, _split = catalogue_entry(data, pick)
         self.machine = Machine(inner, outer, slots)
         self.game = Game(self.machine, start)
         self._layout()
@@ -180,10 +194,26 @@ class Circuli(app.App):
         self._calm_vortex()
         self._burst_left = 0
         self._burst_ms = 0
+        self._engaged = None
+        self._needs_render = True
+        # Dials receive no samples while the victory sweep or a burst plays
+        # out, so re-arm them explicitly or the first flick of the new board
+        # would be swallowed waiting for quiet time.
+        if self._twist is not None:
+            self._twist.reset()
+            self._tilt.reset()
+
+    def _rotate(self, ring, direction):
+        """All rotations funnel through here: the engaged-teeth cache is only
+        valid until positions change."""
+        self.game.rotate(ring, direction)
+        self._engaged = None
+        self._needs_render = True
 
     def _calm_vortex(self):
         self._repeat_move = None
         self._repeat_count = 0
+        self._needs_render = True
 
     def _register_rotate(self, direction):
         """Track same-move spam. Returns False when the vortex consumes the
@@ -194,6 +224,7 @@ class Circuli(app.App):
         else:
             self._repeat_move = move
             self._repeat_count = 1
+        self._needs_render = True
         if self._repeat_count >= OMINOUS_LIMIT:
             self._start_burst()
             return False
@@ -213,13 +244,12 @@ class Circuli(app.App):
         self._burst_ms += delta
         if self._burst_ms < BURST_STEP_MS:
             return
-        self._burst_ms = 0
-        options = reversible_moves(self.machine, self.game.positions)
-        if not options:
+        self._burst_ms -= BURST_STEP_MS
+        move = random_reversible_move(self.machine, self.game.positions, random)
+        if move is None:
             self._burst_left = 0
         else:
-            ring, d, _result = options[random.randrange(len(options))]
-            self.game.rotate(ring, d)
+            self._rotate(move[0], move[1])
             self._burst_left -= 1
         if self._burst_left <= 0:
             self._show_tally()
@@ -240,6 +270,7 @@ class Circuli(app.App):
             self._new_puzzle(min(self.ring_count + 1, MAX_RINGS))
             self._show_tally()
             return
+        self._needs_render = True
         self.dialog = YesNoDialog(
             "New puzzle?",
             self,
@@ -253,17 +284,29 @@ class Circuli(app.App):
 
     def _close_dialog(self):
         self.dialog = None
+        self._needs_render = True
         # Presses that answered the dialog must not leak into game input.
         self.button_states.clear()
+
+    def _consume_render(self):
+        """One render per state change: True exactly once, then False until
+        something sets _needs_render again. Keeps idle frames free of ctx
+        work on the badge."""
+        if self._needs_render:
+            self._needs_render = False
+            return True
+        return False
 
     def update(self, delta):
         self.t += delta
         if not self._leds_active:
             # Take the LEDs from the OS pattern on first focus and again
-            # whenever we come back from being minimised.
+            # whenever we come back from being minimised (which also needs a
+            # fresh frame).
             eventbus.emit(PatternDisable())
             self._show_tally()
             self._leds_active = True
+            self._needs_render = True
         if self.dialog is not None:
             # The open dialog owns the buttons; its handlers close it.
             return True
@@ -282,8 +325,9 @@ class Circuli(app.App):
                 if b.pressed(BUTTON_TYPES[name]):
                     self.page = "mode"
                     self.button_states.clear()
+                    self._needs_render = True
                     break
-            return True
+            return self._consume_render()
         if self.page == "mode":
             # Dedicated chooser page: C plays with buttons, E plays MOTU
             # (flick gestures; buttons stay live as backup).
@@ -297,6 +341,7 @@ class Circuli(app.App):
                 self.motu = False
                 self.page = None
                 self.button_states.clear()
+                self._needs_render = True
             elif b.pressed(BUTTON_TYPES["LEFT"]) and imu is not None:
                 self.motu = True
                 self._twist = FlickDial()
@@ -307,7 +352,8 @@ class Circuli(app.App):
                 self._tilt = FlickDial(fire_dps=150.0, rearm_dps=40.0, quiet_ms=400.0)
                 self.page = None
                 self.button_states.clear()
-            return True
+                self._needs_render = True
+            return self._consume_render()
         b = self.button_states
         # Rotation lives on CONFIRM/LEFT (physical C bottom-right / E
         # bottom-left), matching the rotation direction to the buttons'
@@ -333,15 +379,19 @@ class Circuli(app.App):
             self._calm_vortex()
         if b.pressed(BUTTON_TYPES["CONFIRM"]):
             if self._register_rotate(+1):
-                self.game.rotate(self.selected, +1)
+                self._rotate(self.selected, +1)
         if b.pressed(BUTTON_TYPES["LEFT"]):
             if self._register_rotate(-1):
-                self.game.rotate(self.selected, -1)
+                self._rotate(self.selected, -1)
         if self.motu and imu is not None:
             self._update_motu(delta)
         if self.game.is_solved():
             self._mark_solved()
-        return True
+            return True
+        if self._repeat_count >= OMINOUS_VISIBLE or DEBUG:
+            # The vortex pulses with time, so keep rendering while visible.
+            return True
+        return self._consume_render()
 
     def _update_motu(self, delta):
         # A sharp twist flick turns the selected ring; the vortex counts
@@ -352,7 +402,7 @@ class Circuli(app.App):
         step = self._twist.feed(gyro[MOTU_TWIST_AXIS] * MOTU_TWIST_SIGN, delta)
         if step:
             if self._register_rotate(step):
-                self.game.rotate(self.selected, step)
+                self._rotate(self.selected, step)
         moved = self._tilt.feed(gyro[MOTU_TILT_AXIS] * MOTU_TILT_SIGN, delta)
         if moved:
             self.selected = (self.selected + moved) % self.machine.rings
@@ -413,7 +463,9 @@ class Circuli(app.App):
             ctx.restore()
             return
         self._draw_top_reference(ctx)
-        engaged_outer, engaged_inner = self._engaged_teeth()
+        if self._engaged is None:
+            self._engaged = self._engaged_teeth()
+        engaged_outer, engaged_inner = self._engaged
         for i in range(self.machine.rings):
             self._draw_ring(ctx, i, engaged_outer[i], engaged_inner[i])
         if not self.solved:
@@ -557,7 +609,10 @@ class Circuli(app.App):
         ctx.rgb(0.5 + 0.4 * intensity * pulse, 0.1, 0.25)
         for k in range(5):
             angle = spin + k * (2 * math.pi / 5)
-            _tooth(ctx, r, r + 3 + 3 * intensity * pulse, angle, 1.5 + 2 * intensity)
+            _tooth(
+                ctx, r, r + 3 + 3 * intensity * pulse,
+                math.cos(angle), math.sin(angle), 1.5 + 2 * intensity,
+            )
 
     def _draw_key_hints(self, ctx):
         # Compact reminders at the physical button angles: C (+30) rotates CW,
@@ -673,11 +728,19 @@ class Circuli(app.App):
         for off in m.outer_teeth[i]:
             tc = ENGAGED_COLOR if (not self.solved and off in engaged_outer) else color
             ctx.rgb(*tc)
-            _tooth(ctx, r, r + self.tooth_len, _slot_angle(m, p + off), self.tooth_half_w)
+            v = (p + off) % m.slots
+            _tooth(
+                ctx, r, r + self.tooth_len,
+                self.slot_cos[v], self.slot_sin[v], self.tooth_half_w,
+            )
         for off in m.inner_teeth[i]:
             tc = ENGAGED_COLOR if (not self.solved and off in engaged_inner) else color
             ctx.rgb(*tc)
-            _tooth(ctx, r - self.tooth_len, r, _slot_angle(m, p + off), self.tooth_half_w)
+            v = (p + off) % m.slots
+            _tooth(
+                ctx, r - self.tooth_len, r,
+                self.slot_cos[v], self.slot_sin[v], self.tooth_half_w,
+            )
 
     def _draw_marker(self, ctx, i):
         # Alignment marker (ring-frame offset 0): a yellow section of the ring
@@ -685,7 +748,7 @@ class Circuli(app.App):
         # every section sits under the dotted target line.
         r = self.radii[i]
         p = self.game.positions[i]
-        a = _slot_angle(self.machine, p)
+        a = self.slot_angles[p % self.machine.slots]
         half = MARKER_LEN / (2 * r)
         ctx.rgb(1.0, 0.9, 0.2)
         ctx.line_width = self.ring_stroke + (4 if i == self.selected else 2)
