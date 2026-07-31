@@ -1,9 +1,15 @@
 # Circuli
 
 A ring puzzle for the [Tildagon](https://github.com/emfcamp/badge-2024-software)
-badge. Three concentric rings carry interlocking teeth; rotating one ring can
-catch and drag its neighbours. Line up every ring's alignment marker with the
-target at the top to solve it.
+badge. Concentric rings carry interlocking teeth; rotating one ring can catch
+and drag its neighbours. Line up every ring's alignment marker with the target
+at the top to solve it.
+
+Every puzzle has a freshly randomised teeth layout (1–3 teeth per rim on each
+gap between rings), scrambled by a random walk that is solvable by
+construction. You start at 3 rings; each solved puzzle adds a ring, up to 5.
+Progress resets when the app restarts. Dim glyphs at the display edge remind
+you what the game buttons do.
 
 ## Controls
 
@@ -12,7 +18,7 @@ target at the top to solve it.
 | C (bottom-right) | Rotate the selected ring clockwise |
 | E (bottom-left) | Rotate the selected ring anticlockwise |
 | A / D (top / bottom) | Select the next ring outward / inward |
-| B (top-right) | New puzzle (asks for confirmation while a game is in progress) |
+| B (top-right) | New puzzle — advances to the next level on a solved board; asks for confirmation mid-game |
 | F (top-left) | Exit to launcher |
 
 In the new-puzzle confirmation, C answers **Yes** and F answers **No**, as

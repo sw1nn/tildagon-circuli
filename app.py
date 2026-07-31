@@ -6,21 +6,34 @@ import app
 from app_components import YesNoDialog
 from events.input import Buttons, BUTTON_TYPES
 
-from .game import Game, default_machine
-
-# Ring radii (innermost first). Gaps are sized so adjacent rings' teeth reach
-# toward each other and nearly meet, making meshing visible.
-RING_RADII = [40, 70, 100]
-RING_COLORS = [(1.0, 0.35, 0.35), (0.3, 1.0, 0.45), (0.4, 0.6, 1.0)]
-INACTIVE_COLOR = (0.5, 0.5, 0.5)  # rings that are not currently selected
+from .game import Game, random_machine
 
 DEBUG = False           # centre readout of ring slots and current selection
 
-TOOTH_LEN = 13          # radial length of a tooth (nearly half the 30px gap)
-TOOTH_HALF_W = 0.12     # angular half-width of a tooth, radians
-MARKER_SIZE = 11
+START_RINGS = 3
+MAX_RINGS = 5           # progression cap; the 240px display gets cramped above
+
+# Ring band. Radii are spread evenly from R_INNER to R_OUTER whatever the ring
+# count; teeth and gaps shrink together as rings are added.
+R_INNER = 40
+R_OUTER = 100
+TOOTH_RATIO = 0.43      # tooth length as a fraction of ring spacing
+MARKER_MIN = 7          # alignment markers never shrink below this
+
+RING_COLORS = [
+    (1.0, 0.35, 0.35),
+    (0.3, 1.0, 0.45),
+    (0.4, 0.6, 1.0),
+    (1.0, 0.75, 0.2),
+    (0.85, 0.4, 1.0),
+]
+INACTIVE_COLOR = (0.5, 0.5, 0.5)  # rings that are not currently selected
+
 SOLVED_COLOR = (0.2, 1.0, 0.3)
 ENGAGED_COLOR = (1.0, 1.0, 1.0)  # teeth currently catching an opposing tooth
+
+HINT_COLOR = (0.45, 0.45, 0.45)  # edge glyphs reminding what the keys do
+HINT_R = 115
 
 
 def _slot_angle(machine, v):
@@ -34,13 +47,15 @@ def _circular_dist(a, b, slots):
 
 
 def _tooth(ctx, r0, r1, angle, half_w):
-    """Fill a chunky tooth: a radial block from r0 to r1, `half_w` wide."""
-    a0, a1 = angle - half_w, angle + half_w
+    """Fill a gear tooth: a parallel-sided block running radially r0 -> r1,
+    offset a constant `half_w` px either side of the radius line."""
+    ca, sa = math.cos(angle), math.sin(angle)
+    px, py = -sa * half_w, ca * half_w
     ctx.begin_path()
-    ctx.move_to(r0 * math.cos(a0), r0 * math.sin(a0))
-    ctx.line_to(r0 * math.cos(a1), r0 * math.sin(a1))
-    ctx.line_to(r1 * math.cos(a1), r1 * math.sin(a1))
-    ctx.line_to(r1 * math.cos(a0), r1 * math.sin(a0))
+    ctx.move_to(r0 * ca - px, r0 * sa - py)
+    ctx.line_to(r0 * ca + px, r0 * sa + py)
+    ctx.line_to(r1 * ca + px, r1 * sa + py)
+    ctx.line_to(r1 * ca - px, r1 * sa - py)
     ctx.close_path()
     ctx.fill()
 
@@ -69,24 +84,40 @@ class Circuli(app.App):
     def __init__(self):
         super().__init__()
         self.button_states = Buttons(self)
-        self.machine = default_machine()
-        self.game = Game(self.machine)
         random.seed(time.ticks_ms())
-        self.selected = 0
-        self.solved = False
         self.t = 0
         self.dialog = None
+        self.ring_count = START_RINGS
         self._new_puzzle()
 
-    def _new_puzzle(self):
-        self.game.scramble(random)
+    def _layout(self):
+        """Derive ring geometry from the current ring count."""
+        n = self.ring_count
+        spacing = (R_OUTER - R_INNER) / (n - 1)
+        self.radii = [R_INNER + i * spacing for i in range(n)]
+        self.tooth_len = spacing * TOOTH_RATIO
+        self.tooth_half_w = max(2.0, self.tooth_len * 0.35)
+        self.marker_size = max(MARKER_MIN, spacing * 0.37)
+
+    def _new_puzzle(self, ring_count=None):
+        if ring_count is not None:
+            self.ring_count = ring_count
+        # A machine with no catch-free moves scrambles to solved; reroll.
+        while True:
+            self.machine = random_machine(random, self.ring_count)
+            self.game = Game(self.machine)
+            self.game.scramble(random)
+            if not self.game.is_solved():
+                break
+        self._layout()
+        self.selected = 0
         self.solved = False
 
     def _request_new_puzzle(self):
-        # Mid-game a scramble throws away progress, so ask first; a solved
-        # board has nothing to lose.
+        # A solved board advances the progression with nothing to lose;
+        # mid-game a scramble throws away progress, so ask first.
         if self.solved:
-            self._new_puzzle()
+            self._new_puzzle(min(self.ring_count + 1, MAX_RINGS))
             return
         self.dialog = YesNoDialog(
             "New puzzle?",
@@ -161,6 +192,8 @@ class Circuli(app.App):
         engaged_outer, engaged_inner = self._engaged_teeth()
         for i in range(self.machine.rings):
             self._draw_ring(ctx, i, engaged_outer[i], engaged_inner[i])
+        if not self.solved:
+            self._draw_key_hints(ctx)
         # Draw every alignment indicator last, so notches from neighbouring
         # rings can never obscure it.
         for i in range(self.machine.rings):
@@ -197,12 +230,54 @@ class Circuli(app.App):
             ctx.move_to(0, y)
             ctx.text("%sr%d %d" % (">" if selected else "", i, self.game.positions[i]))
 
+    def _draw_key_hints(self, ctx):
+        # Compact reminders at the physical button angles: C (+30) rotates CW,
+        # E (+150) rotates CCW, A (top) selects outward, D (bottom) inward.
+        # The A chevron sits 15 degrees clockwise of 12 o'clock so it clears
+        # the fixed target marker.
+        ctx.rgb(*HINT_COLOR)
+        ctx.line_width = 2
+        self._hint_arc_arrow(ctx, math.radians(30), cw=True)
+        self._hint_arc_arrow(ctx, math.radians(150), cw=False)
+        self._hint_chevron(ctx, math.radians(-75), outward=True)
+        self._hint_chevron(ctx, math.radians(90), outward=False)
+
+    def _hint_arc_arrow(self, ctx, angle, cw):
+        # A short arc concentric with the rings, with a filled arrowhead on
+        # the end it points along (increasing angle = clockwise on screen).
+        half = math.radians(8)
+        ctx.begin_path()
+        ctx.arc(0, 0, HINT_R, angle - half, angle + half, False)
+        ctx.stroke()
+        s = 1 if cw else -1
+        tip = angle + half * s
+        ca, sa = math.cos(tip), math.sin(tip)
+        tx, ty = HINT_R * ca, HINT_R * sa
+        ctx.begin_path()
+        ctx.move_to(tx - sa * 5 * s, ty + ca * 5 * s)
+        ctx.line_to(tx + ca * 3, ty + sa * 3)
+        ctx.line_to(tx - ca * 3, ty - sa * 3)
+        ctx.close_path()
+        ctx.fill()
+
+    def _hint_chevron(self, ctx, angle, outward):
+        # A stroked chevron pointing radially out (select outward) or in.
+        ca, sa = math.cos(angle), math.sin(angle)
+        px, py = -sa, ca
+        tip_r = HINT_R + 4 if outward else HINT_R - 4
+        base_r = HINT_R - 4 if outward else HINT_R + 4
+        ctx.begin_path()
+        ctx.move_to(base_r * ca + px * 5, base_r * sa + py * 5)
+        ctx.line_to(tip_r * ca, tip_r * sa)
+        ctx.line_to(base_r * ca - px * 5, base_r * sa - py * 5)
+        ctx.stroke()
+
     def _draw_top_reference(self, ctx):
         # Fixed target marker at the top, pointing down toward the rings.
         angle = _slot_angle(self.machine, 0)
-        r = RING_RADII[-1] + TOOTH_LEN + MARKER_SIZE + 6
+        r = self.radii[-1] + self.tooth_len + self.marker_size + 6
         ctx.rgb(1.0, 0.9, 0.2)
-        _triangle(ctx, r, angle, MARKER_SIZE, outward=False)
+        _triangle(ctx, r, angle, self.marker_size, outward=False)
 
     def _ring_color(self, i, selected):
         if self.solved:
@@ -216,7 +291,7 @@ class Circuli(app.App):
     def _draw_ring(self, ctx, i, engaged_outer, engaged_inner):
         m = self.machine
         p = self.game.positions[i]
-        r = RING_RADII[i]
+        r = self.radii[i]
         selected = i == self.selected
         color = self._ring_color(i, selected)
 
@@ -229,18 +304,18 @@ class Circuli(app.App):
         for off in m.outer_teeth[i]:
             tc = ENGAGED_COLOR if (not self.solved and off in engaged_outer) else color
             ctx.rgb(*tc)
-            _tooth(ctx, r, r + TOOTH_LEN, _slot_angle(m, p + off), TOOTH_HALF_W)
+            _tooth(ctx, r, r + self.tooth_len, _slot_angle(m, p + off), self.tooth_half_w)
         for off in m.inner_teeth[i]:
             tc = ENGAGED_COLOR if (not self.solved and off in engaged_inner) else color
             ctx.rgb(*tc)
-            _tooth(ctx, r - TOOTH_LEN, r, _slot_angle(m, p + off), TOOTH_HALF_W)
+            _tooth(ctx, r - self.tooth_len, r, _slot_angle(m, p + off), self.tooth_half_w)
 
     def _draw_marker(self, ctx, i):
         # Alignment marker (ring-frame offset 0), tip pointing outward.
-        r = RING_RADII[i]
+        r = self.radii[i]
         p = self.game.positions[i]
         ctx.rgb(*self._ring_color(i, i == self.selected))
-        _triangle(ctx, r + TOOTH_LEN + 3, _slot_angle(self.machine, p), MARKER_SIZE, outward=True)
+        _triangle(ctx, r + self.tooth_len + 3, _slot_angle(self.machine, p), self.marker_size, outward=True)
 
     def _draw_cracked(self, ctx):
         ctx.rgb(*SOLVED_COLOR)
