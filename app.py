@@ -14,7 +14,7 @@ RING_RADII = [40, 70, 100]
 RING_COLORS = [(1.0, 0.35, 0.35), (0.3, 1.0, 0.45), (0.4, 0.6, 1.0)]
 INACTIVE_COLOR = (0.5, 0.5, 0.5)  # rings that are not currently selected
 
-DEBUG = True            # centre readout of ring slots and current selection
+DEBUG = False           # centre readout of ring slots and current selection
 
 TOOTH_LEN = 13          # radial length of a tooth (nearly half the 30px gap)
 TOOTH_HALF_W = 0.12     # angular half-width of a tooth, radians
@@ -202,8 +202,9 @@ class Circuli(app.App):
         # any drift between the selection state and the highlighted ring is
         # directly visible.
         ctx.font_size = 11
-        ctx.text_align = "center"
-        ctx.text_baseline = "middle"
+        # Real badge ctx wants the enum constants; strings only work in the sim.
+        ctx.text_align = ctx.CENTER
+        ctx.text_baseline = ctx.MIDDLE
         n = self.machine.rings
         y = -5.5 * n
         ctx.rgb(1.0, 1.0, 1.0)
@@ -281,8 +282,8 @@ class Circuli(app.App):
     def _draw_cracked(self, ctx):
         ctx.rgb(*SOLVED_COLOR)
         ctx.font_size = 24
-        ctx.text_align = "center"
-        ctx.text_baseline = "middle"
+        ctx.text_align = ctx.CENTER
+        ctx.text_baseline = ctx.MIDDLE
         ctx.begin_path()
         ctx.move_to(0, -15)
         ctx.text("CIRCULI")
