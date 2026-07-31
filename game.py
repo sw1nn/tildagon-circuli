@@ -115,48 +115,68 @@ def _apply(machine, positions, ring, direction):
     return tuple(pos)
 
 
-def _catch_free_moves(machine, pos):
-    """Every (ring, direction, result) move from `pos` that turns exactly the
-    driven ring, dragging nothing."""
-    moves = []
+def _reversible_moves(machine, pos):
+    """Every move from `pos` that some single move provably undoes: a list of
+    (ring, direction, result, undo) where applying `undo` at `result` returns
+    exactly to `pos`.
+
+    Atomic moves in general are NOT invertible (a catch that drags neighbours
+    is not always undone by the counter-rotation), so each candidate's undo is
+    found by checking all single moves from the result. Drag cascades usually
+    do reverse — pushing the far end of the chain back re-drags the lot — so
+    this admits far more moves than restricting to drag-free ones, which
+    matters on dense machines where almost every turn catches something.
+    """
+    out = []
     for ring in range(machine.rings):
         for d in (1, -1):
-            new = _apply(machine, pos, ring, d)
-            moved = 0
-            for a, b in zip(new, pos):
-                if a != b:
-                    moved += 1
-            if moved == 1:
-                moves.append((ring, d, new))
-    return moves
+            result = _apply(machine, pos, ring, d)
+            if _apply(machine, result, ring, -d) == pos:
+                out.append((ring, d, result, (ring, -d)))
+                continue
+            undo = None
+            for r2 in range(machine.rings):
+                for d2 in (1, -1):
+                    if _apply(machine, result, r2, d2) == pos:
+                        undo = (r2, d2)
+                        break
+                if undo:
+                    break
+            if undo:
+                out.append((ring, d, result, undo))
+    return out
 
 
 def scramble_walk(machine, rng, moves):
-    """Random walk of `moves` catch-free single-ring turns from solved.
+    """Random walk of `moves` reversible turns from solved.
 
-    A catch-free move is reversible: the counter-turn returns the ring to a
-    slot arrangement that was just valid, and cannot itself catch. So every
-    state the walk reaches is solvable by construction — undo the path in
-    reverse. Returns (positions, path) where path is the [(ring, direction)]
-    list actually applied. If the walk wraps back onto solved it keeps going
-    within a small allowance; if a state offers no catch-free move (rare on
-    degenerate machines) the walk ends early, and the caller should reroll.
+    Every step is verified to have a single-move undo, so the end state is
+    solvable by construction. Returns (positions, undo_path): applying the
+    undo moves in reverse order returns to solved.
 
-    Atomic moves in general are NOT invertible (a catch that drags neighbours
-    cannot be undone by a single counter-rotation), which is why the walk is
-    restricted to catch-free moves instead of sampling arbitrary ones.
+    Each ring's position is the net effect of its own moves, so a short walk
+    often random-walks a ring straight back to slot 0. Once the length target
+    is met the walk keeps going until no ring sits aligned, preferring moves
+    that displace still-aligned rings, within the allowance. If a state
+    offers no reversible move at all the walk ends early, and the caller
+    should reroll the machine.
     """
-    solved = tuple([0] * machine.rings)
-    pos = solved
-    path = []
-    allowance = moves + 8
-    while (len(path) < moves or pos == solved) and len(path) < allowance:
-        options = _catch_free_moves(machine, pos)
+    pos = tuple([0] * machine.rings)
+    undo_path = []
+    allowance = moves + 6 * machine.rings
+    while len(undo_path) < allowance:
+        if len(undo_path) >= moves and 0 not in pos:
+            break
+        options = _reversible_moves(machine, pos)
         if not options:
             break
-        ring, d, pos = options[rng.randrange(len(options))]
-        path.append((ring, d))
-    return pos, path
+        if len(undo_path) >= moves:
+            targeted = [o for o in options if pos[o[0]] == 0]
+            if targeted:
+                options = targeted
+        _ring, _d, pos, undo = options[rng.randrange(len(options))]
+        undo_path.append(undo)
+    return pos, undo_path
 
 
 class Game:

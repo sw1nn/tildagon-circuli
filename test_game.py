@@ -200,21 +200,41 @@ class ScrambleTest(unittest.TestCase):
             )
 
     def test_walk_scramble_reverses_back_to_solved(self):
-        # Constructive solvability proof: undoing the walk's moves in reverse
-        # order must land exactly on solved, at every ring count.
+        # Constructive solvability proof: applying the walk's undo moves in
+        # reverse order must land exactly on solved, at every ring count.
         for rings in (3, 4, 5):
             for seed in range(30):
                 rng = random.Random(seed * 31 + rings)
                 m = random_machine(rng, rings)
-                pos, path = scramble_walk(m, rng, 5 * rings)
+                pos, undo_path = scramble_walk(m, rng, 5 * rings)
                 self.assertTrue(is_valid(m, pos))
                 game = Game(m, list(pos))
-                for ring, d in reversed(path):
-                    game.rotate(ring, -d)
+                for ring, d in reversed(undo_path):
+                    game.rotate(ring, d)
                 self.assertTrue(
                     game.is_solved(),
-                    "rings %d seed %d: reverse replay ended at %r"
+                    "rings %d seed %d: undo replay ended at %r"
                     % (rings, seed, game.positions),
+                )
+
+    def test_walk_scramble_leaves_no_ring_aligned(self):
+        # Each ring's position is the net of its own moves, so short walks
+        # frequently random-walk a ring straight back to slot 0; the walk must
+        # keep going until every ring is displaced.
+        for rings in (3, 4, 5):
+            for seed in range(30):
+                rng = random.Random(seed * 37 + rings)
+                # Mirror the app: machines whose walk goes nowhere (locked at
+                # rest) are rerolled, so only accepted machines are asserted.
+                while True:
+                    m = random_machine(rng, rings)
+                    pos, _path = scramble_walk(m, rng, 5 * rings)
+                    if list(pos) != [0] * rings:
+                        break
+                self.assertNotIn(
+                    0,
+                    pos,
+                    "rings %d seed %d: aligned ring in start %r" % (rings, seed, pos),
                 )
 
     def test_scrambled_random_machine_reaches_solved_by_search(self):
