@@ -1,5 +1,6 @@
 import random
 import unittest
+from itertools import product
 
 from game import Game, Machine, default_machine, is_valid
 
@@ -27,6 +28,13 @@ def reaches_solved(machine, start):
                         nxt.append(t)
         frontier = nxt
     return False
+
+
+def all_valid_states(machine):
+    """Yield every ring-position tuple with no physically overlapping teeth."""
+    for state in product(range(machine.slots), repeat=machine.rings):
+        if is_valid(machine, state):
+            yield state
 
 
 def bare_machine():
@@ -85,6 +93,47 @@ class RotateTest(unittest.TestCase):
         game = Game(meshing_machine(), positions=[0, 0, 0])
         game.rotate(1, -1)
         self.assertEqual(game.positions, [11, 11, 0])
+
+
+class DrivenRingInvariantTest(unittest.TestCase):
+    """Whatever the interlocking drags along, the driven ring itself must move
+    exactly one slot in the requested direction: CW takes it from N to
+    (N + 1) % slots, CCW from N to (N - 1) % slots. Exhaustive over every
+    valid state, ring, and direction."""
+
+    def assert_driven_ring_moves_one_slot(self, machine):
+        s = machine.slots
+        for state in all_valid_states(machine):
+            for ring in range(machine.rings):
+                for direction in (+1, -1):
+                    game = Game(machine, list(state))
+                    game.rotate(ring, direction)
+                    expected = (state[ring] + direction) % s
+                    self.assertEqual(
+                        game.positions[ring],
+                        expected,
+                        "ring %d driven %+d from %r landed on %d, expected %d"
+                        % (ring, direction, state, game.positions[ring], expected),
+                    )
+
+    def test_default_machine_driven_ring_always_moves_one_slot(self):
+        self.assert_driven_ring_moves_one_slot(default_machine())
+
+    def test_meshing_machine_driven_ring_always_moves_one_slot(self):
+        self.assert_driven_ring_moves_one_slot(meshing_machine())
+
+    def test_cascade_machine_driven_ring_always_moves_one_slot(self):
+        self.assert_driven_ring_moves_one_slot(cascade_machine())
+
+    def test_cw_wraps_from_last_slot_to_zero(self):
+        game = Game(bare_machine(), positions=[11, 0, 0])
+        game.rotate(0, +1)
+        self.assertEqual(game.positions[0], 0)
+
+    def test_ccw_wraps_from_zero_to_last_slot(self):
+        game = Game(bare_machine(), positions=[0, 0, 0])
+        game.rotate(0, -1)
+        self.assertEqual(game.positions[0], 11)
 
 
 class SolvedTest(unittest.TestCase):
