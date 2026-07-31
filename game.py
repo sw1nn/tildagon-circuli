@@ -115,38 +115,6 @@ def _apply(machine, positions, ring, direction):
     return tuple(pos)
 
 
-def _reversible_moves(machine, pos):
-    """Every move from `pos` that some single move provably undoes: a list of
-    (ring, direction, result, undo) where applying `undo` at `result` returns
-    exactly to `pos`.
-
-    Atomic moves in general are NOT invertible (a catch that drags neighbours
-    is not always undone by the counter-rotation), so each candidate's undo is
-    found by checking all single moves from the result. Drag cascades usually
-    do reverse — pushing the far end of the chain back re-drags the lot — so
-    this admits far more moves than restricting to drag-free ones, which
-    matters on dense machines where almost every turn catches something.
-    """
-    out = []
-    for ring in range(machine.rings):
-        for d in (1, -1):
-            result = _apply(machine, pos, ring, d)
-            if _apply(machine, result, ring, -d) == pos:
-                out.append((ring, d, result, (ring, -d)))
-                continue
-            undo = None
-            for r2 in range(machine.rings):
-                for d2 in (1, -1):
-                    if _apply(machine, result, r2, d2) == pos:
-                        undo = (r2, d2)
-                        break
-                if undo:
-                    break
-            if undo:
-                out.append((ring, d, result, undo))
-    return out
-
-
 def start_is_scrambled(positions):
     """A start position that actually looks scrambled: no ring aligned to the
     target (slot 0) and no adjacent pair of rings sharing a position."""
@@ -157,52 +125,6 @@ def start_is_scrambled(positions):
             return False
     return True
 
-
-def _unscrambled_rings(pos):
-    """Rings spoiling start_is_scrambled: at slot 0 or matching a neighbour."""
-    bad = set()
-    for i, p in enumerate(pos):
-        if p == 0:
-            bad.add(i)
-    for i in range(len(pos) - 1):
-        if pos[i] == pos[i + 1]:
-            bad.add(i)
-            bad.add(i + 1)
-    return bad
-
-
-def scramble_walk(machine, rng, moves):
-    """Random walk of `moves` reversible turns from solved.
-
-    Every step is verified to have a single-move undo, so the end state is
-    solvable by construction. Returns (positions, undo_path): applying the
-    undo moves in reverse order returns to solved.
-
-    A short random walk frequently leaves a ring back on slot 0 or two
-    neighbours on the same slot. Once the length target is met the walk keeps
-    going until start_is_scrambled holds, preferring moves of the offending
-    rings, within the allowance. It can still fail — a state may offer no
-    reversible move, and a tightly coupled pair whose every move drags both
-    can never lose its mutual alignment — so callers reroll the machine when
-    the result is not scrambled.
-    """
-    pos = tuple([0] * machine.rings)
-    undo_path = []
-    allowance = moves + 8 * machine.rings
-    while len(undo_path) < allowance:
-        bad = _unscrambled_rings(pos)
-        if len(undo_path) >= moves and not bad:
-            break
-        options = _reversible_moves(machine, pos)
-        if not options:
-            break
-        if len(undo_path) >= moves:
-            targeted = [o for o in options if o[0] in bad]
-            if targeted:
-                options = targeted
-        _ring, _d, pos, undo = options[rng.randrange(len(options))]
-        undo_path.append(undo)
-    return pos, undo_path
 
 
 class Game:
@@ -223,14 +145,3 @@ class Game:
             if p != 0:
                 return False
         return True
-
-    def scramble(self, rng, moves=None):
-        """Set positions to a guaranteed-solvable start via a catch-free walk.
-
-        May leave the game solved only if the machine offers no catch-free
-        moves at all; callers roll a fresh machine in that case.
-        """
-        if moves is None:
-            moves = 5 * self.machine.rings
-        pos, _path = scramble_walk(self.machine, rng, moves)
-        self.positions = list(pos)

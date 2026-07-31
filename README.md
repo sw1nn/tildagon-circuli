@@ -5,14 +5,15 @@ badge. Concentric rings carry interlocking teeth; rotating one ring can catch
 and drag its neighbours. Line up every ring's alignment marker with the target
 at the top to solve it.
 
-Every puzzle has a freshly randomised teeth layout (3–5 teeth per rim on each
-gap between rings), scrambled by a random walk that is solvable by
-construction. You start at 3 rings; solving a puzzle sweeps the badge LEDs
-once around the hexagon to a short victory arpeggio, then automatically
-advances to the next level,
-up to 5 rings. The LEDs then show a steady tally — one lit LED per puzzle
-solved this session. Progress resets when the app restarts. Dim glyphs at
-the display edge remind you what the game buttons do.
+Puzzles come from a pre-generated level catalogue: random teeth layouts whose
+solvability and exact minimum solve distance are verified offline by
+exhaustive search (see `tools/generate_catalogue.py`), so every start is
+guaranteed solvable and properly hard for its tier. You start at 3 rings;
+solving a puzzle sweeps the badge LEDs once around the hexagon to a short
+victory arpeggio, then automatically advances to the next level, up to 5
+rings. The LEDs then show a steady tally — one lit LED per puzzle solved this
+session. Progress resets when the app restarts. Glyphs on tabs at the display
+edge remind you what the game buttons do.
 
 ## Controls
 
@@ -36,10 +37,17 @@ other way separates them.
 
 ## Structure
 
-- `game.py` — pure game logic (rings, teeth, the coupling rule, solvability). No
-  display or hardware imports, so it runs and tests under plain CPython.
-- `test_game.py` — unit tests for the logic: `python -m unittest test_game`.
-- `app.py` — the `Circuli` app: input handling and `ctx` rendering.
+- `game.py` — pure game logic (rings, teeth, the coupling rule). No display
+  or hardware imports, so it runs and tests under plain CPython.
+- `levels_<n>.json` — the level catalogue for `n` rings; each entry is a
+  machine, a start position, and its exact minimum solve distance.
+- `tools/generate_catalogue.py` — offline (CPython-only) catalogue generator:
+  exhaustively distance-maps random machines by reverse breadth-first search
+  and harvests the hardest properly-scrambled starts. Regenerate with
+  `just gen-levels [seed]`.
+- `test_game.py` — unit tests for the logic and the shipped catalogue:
+  `python -m unittest test_game`.
+- `app.py` — the `Circuli` app: input handling, `ctx` rendering, LEDs/sound.
 - `metadata.json` / `__init__.py` — Tildagon app metadata and entry point.
 
 ## Developing

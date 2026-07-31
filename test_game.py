@@ -1,3 +1,5 @@
+import json
+import os
 import random
 import unittest
 from itertools import product
@@ -10,34 +12,45 @@ from game import (
     default_machine,
     is_valid,
     random_machine,
-    scramble_walk,
     start_is_scrambled,
 )
 
+CATALOGUE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-def reaches_solved(machine, start):
-    """Independent oracle: breadth-first search from `start` to the solved
-    (all-zero) state over the real move set. Used to verify scramble output."""
+
+def solve_distance(machine, start, limit):
+    """Independent oracle: exact minimum moves from `start` to solved via
+    breadth-first search over the real move set; None if deeper than
+    `limit`. Used to verify the shipped catalogue distances."""
     n = machine.rings
     solved = tuple([0] * n)
-    seen = set()
-    seen.add(tuple(start))
-    frontier = [tuple(start)]
-    while frontier:
+    start = tuple(start)
+    if start == solved:
+        return 0
+    seen = {start}
+    frontier = [start]
+    for depth in range(1, limit + 1):
         nxt = []
         for state in frontier:
-            if state == solved:
-                return True
             for ring in range(n):
                 for d in (1, -1):
                     g = Game(machine, list(state))
                     g.rotate(ring, d)
                     t = tuple(g.positions)
+                    if t == solved:
+                        return depth
                     if t not in seen:
                         seen.add(t)
                         nxt.append(t)
+        if not nxt:
+            return None
         frontier = nxt
-    return False
+    return None
+
+
+def load_catalogue(rings):
+    with open(os.path.join(CATALOGUE_DIR, "levels_%d.json" % rings)) as f:
+        return json.load(f)
 
 
 def all_valid_states(machine):
@@ -182,77 +195,38 @@ class RandomMachineTest(unittest.TestCase):
                         self.assertTrue(0 <= t < m.slots)
 
 
-class ScrambleTest(unittest.TestCase):
-    def test_scramble_is_never_already_solved(self):
-        machine = default_machine()
-        for seed in range(25):
-            game = Game(machine)
-            game.scramble(random.Random(seed))
-            self.assertFalse(game.is_solved(), "seed %d produced a solved start" % seed)
-
-    def test_scramble_never_starts_in_an_overlapping_state(self):
-        machine = default_machine()
-        for seed in range(40):
-            game = Game(machine)
-            game.scramble(random.Random(seed))
-            self.assertTrue(
-                is_valid(machine, game.positions),
-                "seed %d produced overlapping teeth: %r" % (seed, game.positions),
-            )
-
-    def test_walk_scramble_reverses_back_to_solved(self):
-        # Constructive solvability proof: applying the walk's undo moves in
-        # reverse order must land exactly on solved, at every ring count.
+class CatalogueTest(unittest.TestCase):
+    def test_catalogue_entries_are_valid_and_scrambled(self):
         for rings in (3, 4, 5):
-            for seed in range(30):
-                rng = random.Random(seed * 31 + rings)
-                m = random_machine(rng, rings)
-                pos, undo_path = scramble_walk(m, rng, 5 * rings)
-                self.assertTrue(is_valid(m, pos))
-                game = Game(m, list(pos))
-                for ring, d in reversed(undo_path):
-                    game.rotate(ring, d)
-                self.assertTrue(
-                    game.is_solved(),
-                    "rings %d seed %d: undo replay ended at %r"
-                    % (rings, seed, game.positions),
+            cat = load_catalogue(rings)
+            self.assertEqual(cat["rings"], rings)
+            self.assertTrue(cat["puzzles"])
+            for p in cat["puzzles"]:
+                m = Machine(p["inner"], p["outer"], cat["slots"])
+                self.assertEqual(m.rings, rings)
+                self.assertTrue(is_valid(m, [0] * rings))
+                self.assertTrue(is_valid(m, p["start"]))
+                self.assertTrue(start_is_scrambled(p["start"]))
+                self.assertGreater(p["dist"], 0)
+
+    def test_catalogue_distances_are_exact_for_three_rings(self):
+        # Every shipped 3-ring puzzle re-verified against the BFS oracle.
+        cat = load_catalogue(3)
+        for p in cat["puzzles"]:
+            m = Machine(p["inner"], p["outer"], cat["slots"])
+            self.assertEqual(solve_distance(m, p["start"], p["dist"]), p["dist"])
+
+    def test_catalogue_distances_spot_checked_for_higher_rings(self):
+        # Full re-verification is slow at 4-5 rings; spot-check a sample.
+        for rings, samples in ((4, 4), (5, 2)):
+            cat = load_catalogue(rings)
+            rng = random.Random(rings)
+            for _ in range(samples):
+                p = cat["puzzles"][rng.randrange(len(cat["puzzles"]))]
+                m = Machine(p["inner"], p["outer"], cat["slots"])
+                self.assertEqual(
+                    solve_distance(m, p["start"], p["dist"]), p["dist"]
                 )
-
-    def test_walk_scramble_leaves_no_alignment(self):
-        # A random walk frequently leaves a ring back at slot 0 or two
-        # neighbours on the same slot; the walk chases both away and the
-        # caller rerolls machines it cannot fix. Mirror the app's accept
-        # loop, then assert the accepted start is fully scrambled: no ring
-        # at 0 and no adjacent pair sharing a position.
-        for rings in (3, 4, 5):
-            for seed in range(30):
-                rng = random.Random(seed * 37 + rings)
-                while True:
-                    m = random_machine(rng, rings)
-                    pos, _path = scramble_walk(m, rng, 5 * rings)
-                    if start_is_scrambled(pos):
-                        break
-                self.assertNotIn(0, pos)
-                for i in range(rings - 1):
-                    self.assertNotEqual(
-                        pos[i],
-                        pos[i + 1],
-                        "rings %d seed %d: adjacent alignment in %r"
-                        % (rings, seed, pos),
-                    )
-
-    def test_scrambled_random_machine_reaches_solved_by_search(self):
-        # Independent oracle cross-check on the smallest ring count, where
-        # breadth-first search stays cheap.
-        for seed in range(5):
-            rng = random.Random(seed)
-            m = random_machine(rng, 3)
-            game = Game(m)
-            game.scramble(rng)
-            self.assertTrue(
-                reaches_solved(m, game.positions),
-                "seed %d produced an unsolvable start: %r" % (seed, game.positions),
-            )
 
 
 class InvertibilityTest(unittest.TestCase):
