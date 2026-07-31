@@ -10,6 +10,12 @@ from system.patterndisplay.events import PatternDisable, PatternEnable
 from tildagonos import tildagonos
 
 from .game import Game, Machine, catalogue_entry, catalogue_info, reversible_moves
+from .motion import GyroDial, TiltRatchet
+
+try:
+    import imu
+except ImportError:
+    imu = None
 
 DEBUG = False           # centre readout of ring slots and current selection
 
@@ -54,6 +60,19 @@ LED_CYCLE_STEP_MS = 120           # sweep speed; full cycle ~1.7s with the beat
 # bursts and churns the rings with random reversible moves (teeth still
 # latch, and reversibility keeps the mess provably solvable).
 OMINOUS_LIMIT = 8       # same-move presses before the burst
+
+# MOTU (motion controls): twist the badge to turn the selected ring, tilt
+# away/toward to select. Axis mapping calibrated on hardware (2026-07-31):
+# accel z (+9.8 face-up) is the screen normal, player-clockwise twist reads
+# negative on gyro z, and tilting the top edge away reads positive on
+# accel x. Tilt is ratcheted relative to a baseline captured at mode start,
+# so any holding posture counts as level.
+MOTU_TWIST_AXIS = 2     # gyro axis about the screen normal
+MOTU_TWIST_SIGN = -1
+MOTU_PITCH_AXIS = 0     # accel axis that swings when the top edge tilts
+MOTU_PITCH_SIGN = 1
+MOTU_NORMAL_AXIS = 2    # accel axis out of the screen
+MOTU_NORMAL_SIGN = 1
 OMINOUS_VISIBLE = 2     # presses before the vortex starts to show
 BURST_MOVES = 6         # churn moves per burst
 BURST_STEP_MS = 90      # churn speed, one move per step
@@ -114,7 +133,10 @@ class Circuli(app.App):
         random.seed(time.ticks_ms())
         self.t = 0
         self.dialog = None
-        self.help_open = True  # instruction page shown on every launch
+        self.help_open = True  # instruction page doubles as mode chooser
+        self.motu = False
+        self._dial = None
+        self._ratchet = None
         self.ring_count = START_RINGS
         self._catalogues = {}
         self.solve_count = 0
@@ -253,17 +275,24 @@ class Circuli(app.App):
             self._advance_burst(delta)
             return True
         if self.help_open:
+            # The help page is also the mode chooser: C plays with buttons,
+            # E plays MOTU (twist and tilt; buttons stay live as backup).
             b = self.button_states
             if b.pressed(BUTTON_TYPES["CANCEL"]):
                 eventbus.emit(PatternEnable())
                 self._leds_active = False
                 self.minimise()
                 return True
-            for name in ("CONFIRM", "UP", "DOWN", "LEFT", "RIGHT"):
-                if b.pressed(BUTTON_TYPES[name]):
-                    self.help_open = False
-                    self.button_states.clear()
-                    break
+            if b.pressed(BUTTON_TYPES["CONFIRM"]):
+                self.motu = False
+                self.help_open = False
+                self.button_states.clear()
+            elif b.pressed(BUTTON_TYPES["LEFT"]) and imu is not None:
+                self.motu = True
+                self._dial = GyroDial()
+                self._ratchet = TiltRatchet()
+                self.help_open = False
+                self.button_states.clear()
             return True
         b = self.button_states
         # Rotation lives on CONFIRM/LEFT (physical C bottom-right / E
@@ -294,9 +323,33 @@ class Circuli(app.App):
         if b.pressed(BUTTON_TYPES["LEFT"]):
             if self._register_rotate(-1):
                 self.game.rotate(self.selected, -1)
+        if self.motu and imu is not None:
+            self._update_motu(delta)
         if self.game.is_solved():
             self._mark_solved()
         return True
+
+    def _update_motu(self, delta):
+        # Twist about the screen normal turns the selected ring; the vortex
+        # counts gyro slots exactly like button presses, so cranking in one
+        # direction is punished the same as mashing.
+        gyro = imu.gyro_read()
+        step = self._dial.feed(gyro[MOTU_TWIST_AXIS] * MOTU_TWIST_SIGN, delta)
+        if step:
+            if self._register_rotate(step):
+                self.game.rotate(self.selected, step)
+        # Pitch (tilt away/toward) ratchets the ring selection.
+        acc = imu.acc_read()
+        pitch = math.degrees(
+            math.atan2(
+                acc[MOTU_PITCH_AXIS] * MOTU_PITCH_SIGN,
+                acc[MOTU_NORMAL_AXIS] * MOTU_NORMAL_SIGN,
+            )
+        )
+        moved = self._ratchet.feed(pitch, delta)
+        if moved:
+            self.selected = (self.selected + moved) % self.machine.rings
+            self._calm_vortex()
 
     def _show_tally(self):
         # Steady display: one lit LED per puzzle solved this session.
@@ -433,8 +486,13 @@ class Circuli(app.App):
         ctx.rgb(0.45, 0.45, 0.45)
         ctx.font_size = 12
         ctx.begin_path()
-        ctx.move_to(0, 92)
-        ctx.text("press any key")
+        ctx.move_to(0, 86)
+        ctx.text("MOTU = twist & tilt")
+        ctx.rgb(0.9, 0.9, 0.9)
+        ctx.font_size = 13
+        ctx.begin_path()
+        ctx.move_to(0, 100)
+        ctx.text("C buttons  E MOTU")
 
     def _draw_vortex(self, ctx):
         # Something ominous in the centre gap. It grows with each repeated
