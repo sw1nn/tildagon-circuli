@@ -1,3 +1,4 @@
+import json
 import math
 import random
 import time
@@ -9,7 +10,7 @@ from system.eventbus import eventbus
 from system.patterndisplay.events import PatternDisable, PatternEnable
 from tildagonos import tildagonos
 
-from .game import Game, random_machine, start_is_scrambled
+from .game import Game, Machine
 
 DEBUG = False           # centre readout of ring slots and current selection
 
@@ -37,6 +38,11 @@ ENGAGED_COLOR = (1.0, 1.0, 1.0)  # teeth currently catching an opposing tooth
 
 HINT_COLOR = (1.0, 1.0, 1.0)  # edge glyphs reminding what the keys do
 HINT_R = 115
+HINT_BG = (0.2, 0.2, 0.2)     # tab behind each glyph
+HINT_TAB_EDGE = 122           # just past the visible screen edge
+HINT_TAB_INNER = 103          # how far the tab pokes into the play area
+HINT_TAB_HALF_W = 19
+HINT_TAB_CORNER = 5
 
 LED_COUNT = 12
 LED_TALLY_COLOR = (255, 210, 40)  # steady tally, one LED per solve
@@ -101,6 +107,7 @@ class Circuli(app.App):
         self.t = 0
         self.dialog = None
         self.ring_count = START_RINGS
+        self._catalogues = {}
         self.solve_count = 0
         self._leds_active = False
         self._cycle_ms = 0
@@ -116,17 +123,25 @@ class Circuli(app.App):
         self.tooth_len = spacing * TOOTH_RATIO
         self.tooth_half_w = max(2.0, self.tooth_len * 0.35)
 
+    def _load_catalogue(self, rings):
+        # Levels are generated offline (tools/generate_catalogue.py) with
+        # exact, exhaustively-verified solve distances; on-badge generation
+        # was both too slow and too shallow. Parsed catalogues are cached.
+        cat = self._catalogues.get(rings)
+        if cat is None:
+            path = __file__.rsplit("/", 1)[0] + "/levels_%d.json" % rings
+            with open(path) as f:
+                cat = json.load(f)
+            self._catalogues[rings] = cat
+        return cat
+
     def _new_puzzle(self, ring_count=None):
         if ring_count is not None:
             self.ring_count = ring_count
-        # Reroll machines whose walk could not produce a properly scrambled
-        # start (no ring on the target, no adjacent pair mutually aligned).
-        while True:
-            self.machine = random_machine(random, self.ring_count)
-            self.game = Game(self.machine)
-            self.game.scramble(random)
-            if start_is_scrambled(self.game.positions):
-                break
+        cat = self._load_catalogue(self.ring_count)
+        puzzle = cat["puzzles"][random.randrange(len(cat["puzzles"]))]
+        self.machine = Machine(puzzle["inner"], puzzle["outer"], cat["slots"])
+        self.game = Game(self.machine, puzzle["start"])
         self._layout()
         self.selected = 0
         self.solved = False
@@ -315,14 +330,44 @@ class Circuli(app.App):
     def _draw_key_hints(self, ctx):
         # Compact reminders at the physical button angles: C (+30) rotates CW,
         # E (+150) rotates CCW, A (top) selects outward, D (bottom) inward.
+        # Each glyph sits on a tab poking in from the screen edge — square at
+        # the rim, rounded toward the centre — so the hints read as furniture
+        # from outside the puzzle, drawn over the outer teeth.
+        angles = (
+            math.radians(30),
+            math.radians(150),
+            math.radians(-90),
+            math.radians(90),
+        )
+        ctx.rgb(*HINT_BG)
+        for a in angles:
+            self._hint_tab(ctx, a)
         ctx.rgb(*HINT_COLOR)
         ctx.line_width = 2
-        self._hint_arc_arrow(ctx, math.radians(30), cw=True)
-        self._hint_arc_arrow(ctx, math.radians(150), cw=False)
+        self._hint_arc_arrow(ctx, angles[0], cw=True)
+        self._hint_arc_arrow(ctx, angles[1], cw=False)
         # Both chevrons point radially outward: at the top that reads as an
         # up arrow, at the bottom as a down arrow.
-        self._hint_chevron(ctx, math.radians(-90), outward=True)
-        self._hint_chevron(ctx, math.radians(90), outward=True)
+        self._hint_chevron(ctx, angles[2], outward=True)
+        self._hint_chevron(ctx, angles[3], outward=True)
+
+    def _hint_tab(self, ctx, angle):
+        # Drawn in a rotated frame with the tab lying along +x: square corners
+        # at the screen edge, quarter-circle corners on the inner end.
+        edge, inner = HINT_TAB_EDGE, HINT_TAB_INNER
+        w, rr = HINT_TAB_HALF_W, HINT_TAB_CORNER
+        ctx.save()
+        ctx.rotate(angle)
+        ctx.begin_path()
+        ctx.move_to(edge, -w)
+        ctx.line_to(inner + rr, -w)
+        ctx.arc(inner + rr, -w + rr, rr, -math.pi / 2, math.pi, True)
+        ctx.line_to(inner, w - rr)
+        ctx.arc(inner + rr, w - rr, rr, math.pi, math.pi / 2, True)
+        ctx.line_to(edge, w)
+        ctx.close_path()
+        ctx.fill()
+        ctx.restore()
 
     def _hint_arc_arrow(self, ctx, angle, cw):
         # A short arc concentric with the rings, with a filled arrowhead on
