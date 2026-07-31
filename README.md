@@ -9,10 +9,14 @@ target at the top to solve it.
 
 | Button | Action |
 |---|---|
-| LEFT / RIGHT | Rotate the selected ring anticlockwise / clockwise |
-| UP / DOWN | Select the next ring outward / inward |
-| CONFIRM | New puzzle |
-| CANCEL | Exit to launcher |
+| C (bottom-right) | Rotate the selected ring clockwise |
+| E (bottom-left) | Rotate the selected ring anticlockwise |
+| A / D (top / bottom) | Select the next ring outward / inward |
+| B (top-right) | New puzzle (asks for confirmation while a game is in progress) |
+| F (top-left) | Exit to launcher |
+
+In the new-puzzle confirmation, C answers **Yes** and F answers **No**, as
+labelled on screen.
 
 ## How the rings catch
 

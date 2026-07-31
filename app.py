@@ -3,6 +3,7 @@ import random
 import time
 
 import app
+from app_components import YesNoDialog
 from events.input import Buttons, BUTTON_TYPES
 
 from .game import Game, default_machine
@@ -12,6 +13,8 @@ from .game import Game, default_machine
 RING_RADII = [40, 70, 100]
 RING_COLORS = [(1.0, 0.35, 0.35), (0.3, 1.0, 0.45), (0.4, 0.6, 1.0)]
 INACTIVE_COLOR = (0.5, 0.5, 0.5)  # rings that are not currently selected
+
+DEBUG = True            # centre readout of ring slots and current selection
 
 TOOTH_LEN = 13          # radial length of a tooth (nearly half the 30px gap)
 TOOTH_HALF_W = 0.12     # angular half-width of a tooth, radians
@@ -89,20 +92,49 @@ class Circuli(app.App):
         self.selected = 0
         self.solved = False
         self.t = 0
+        self.dialog = None
         self._new_puzzle()
 
     def _new_puzzle(self):
         self.game.scramble(random)
         self.solved = False
 
+    def _request_new_puzzle(self):
+        # Mid-game a scramble throws away progress, so ask first; a solved
+        # board has nothing to lose.
+        if self.solved:
+            self._new_puzzle()
+            return
+        self.dialog = YesNoDialog(
+            "New puzzle?",
+            self,
+            on_yes=self._scramble_confirmed,
+            on_no=self._close_dialog,
+        )
+
+    def _scramble_confirmed(self):
+        self._new_puzzle()
+        self._close_dialog()
+
+    def _close_dialog(self):
+        self.dialog = None
+        # Presses that answered the dialog must not leak into game input.
+        self.button_states.clear()
+
     def update(self, delta):
         self.t += delta
+        if self.dialog is not None:
+            # The open dialog owns the buttons; its handlers close it.
+            return True
         b = self.button_states
+        # Rotation lives on CONFIRM/LEFT (physical C bottom-right / E
+        # bottom-left), matching the rotation direction to the buttons'
+        # positions on the hexagon. New-puzzle is on RIGHT (physical B).
         if b.pressed(BUTTON_TYPES["CANCEL"]):
             self.minimise()
             return True
-        if b.pressed(BUTTON_TYPES["CONFIRM"]):
-            self._new_puzzle()
+        if b.pressed(BUTTON_TYPES["RIGHT"]):
+            self._request_new_puzzle()
             return True
         if self.solved:
             return True
@@ -111,7 +143,7 @@ class Circuli(app.App):
             self.selected = (self.selected + 1) % n
         if b.pressed(BUTTON_TYPES["DOWN"]):
             self.selected = (self.selected - 1) % n
-        if b.pressed(BUTTON_TYPES["RIGHT"]):
+        if b.pressed(BUTTON_TYPES["CONFIRM"]):
             self.game.rotate(self.selected, +1)
         if b.pressed(BUTTON_TYPES["LEFT"]):
             self.game.rotate(self.selected, -1)
@@ -157,7 +189,34 @@ class Circuli(app.App):
             self._draw_marker(ctx, i)
         if self.solved:
             self._draw_cracked(ctx)
+        elif DEBUG:
+            self._draw_debug(ctx)
+        if self.dialog is not None:
+            self.dialog.draw(ctx)
         ctx.restore()
+
+    def _draw_debug(self, ctx):
+        # Centre readout: the selection index, then one line per ring (r0 =
+        # innermost) with its current slot. Each ring line is tinted with the
+        # exact colour _draw_ring used for it and '>' marks self.selected, so
+        # any drift between the selection state and the highlighted ring is
+        # directly visible.
+        ctx.font_size = 11
+        ctx.text_align = "center"
+        ctx.text_baseline = "middle"
+        n = self.machine.rings
+        y = -5.5 * n
+        ctx.rgb(1.0, 1.0, 1.0)
+        ctx.begin_path()
+        ctx.move_to(0, y)
+        ctx.text("sel %d" % self.selected)
+        for i in range(n):
+            y += 11
+            selected = i == self.selected
+            ctx.rgb(*self._ring_color(i, selected))
+            ctx.begin_path()
+            ctx.move_to(0, y)
+            ctx.text("%sr%d %d" % (">" if selected else "", i, self.game.positions[i]))
 
     def _draw_top_reference(self, ctx):
         # Fixed target marker at the top, pointing down toward the rings.
