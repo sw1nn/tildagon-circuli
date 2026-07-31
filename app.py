@@ -1,4 +1,3 @@
-import json
 import math
 import random
 import time
@@ -10,17 +9,17 @@ from system.eventbus import eventbus
 from system.patterndisplay.events import PatternDisable, PatternEnable
 from tildagonos import tildagonos
 
-from .game import Game, Machine
+from .game import Game, Machine, catalogue_entry, catalogue_info
 
 DEBUG = False           # centre readout of ring slots and current selection
 
 START_RINGS = 3
-MAX_RINGS = 5           # progression cap; the 240px display gets cramped above
+MAX_RINGS = 8           # progression cap; matches the deepest catalogue tier
 
 # Ring band. Radii are spread evenly from R_INNER to R_OUTER whatever the ring
-# count; teeth and gaps shrink together as rings are added.
-R_INNER = 40
-R_OUTER = 100
+# count; teeth, gaps, and strokes shrink together as rings are added.
+R_INNER = 34
+R_OUTER = 102
 TOOTH_RATIO = 0.43      # tooth length as a fraction of ring spacing
 MARKER_LEN = 12         # arc length of the yellow alignment section, px
 
@@ -30,6 +29,9 @@ RING_COLORS = [
     (0.4, 0.6, 1.0),
     (1.0, 0.75, 0.2),
     (0.85, 0.4, 1.0),
+    (0.25, 0.9, 0.95),
+    (1.0, 0.45, 0.75),
+    (0.95, 0.85, 0.7),
 ]
 INACTIVE_COLOR = (0.5, 0.5, 0.5)  # rings that are not currently selected
 
@@ -106,6 +108,7 @@ class Circuli(app.App):
         random.seed(time.ticks_ms())
         self.t = 0
         self.dialog = None
+        self.help_open = True  # instruction page shown on every launch
         self.ring_count = START_RINGS
         self._catalogues = {}
         self.solve_count = 0
@@ -122,26 +125,31 @@ class Circuli(app.App):
         self.radii = [R_INNER + i * spacing for i in range(n)]
         self.tooth_len = spacing * TOOTH_RATIO
         self.tooth_half_w = max(2.0, self.tooth_len * 0.35)
+        self.ring_stroke = 3 if spacing >= 14 else 2
 
     def _load_catalogue(self, rings):
         # Levels are generated offline (tools/generate_catalogue.py) with
         # exact, exhaustively-verified solve distances; on-badge generation
-        # was both too slow and too shallow. Parsed catalogues are cached.
-        cat = self._catalogues.get(rings)
-        if cat is None:
-            path = __file__.rsplit("/", 1)[0] + "/levels_%d.json" % rings
-            with open(path) as f:
-                cat = json.load(f)
-            self._catalogues[rings] = cat
-        return cat
+        # was both too slow and too shallow. The raw binary blob is cached
+        # and only the picked record is ever decoded.
+        data = self._catalogues.get(rings)
+        if data is None:
+            path = __file__.rsplit("/", 1)[0] + "/levels_%d.lvl" % rings
+            with open(path, "rb") as f:
+                data = f.read()
+            self._catalogues[rings] = data
+        return data
 
     def _new_puzzle(self, ring_count=None):
         if ring_count is not None:
             self.ring_count = ring_count
-        cat = self._load_catalogue(self.ring_count)
-        puzzle = cat["puzzles"][random.randrange(len(cat["puzzles"]))]
-        self.machine = Machine(puzzle["inner"], puzzle["outer"], cat["slots"])
-        self.game = Game(self.machine, puzzle["start"])
+        data = self._load_catalogue(self.ring_count)
+        slots, _rings, count = catalogue_info(data)
+        inner, outer, start, _dist, _split = catalogue_entry(
+            data, random.randrange(count)
+        )
+        self.machine = Machine(inner, outer, slots)
+        self.game = Game(self.machine, start)
         self._layout()
         self.selected = 0
         self.solved = False
@@ -180,6 +188,19 @@ class Circuli(app.App):
             self._leds_active = True
         if self.dialog is not None:
             # The open dialog owns the buttons; its handlers close it.
+            return True
+        if self.help_open:
+            b = self.button_states
+            if b.pressed(BUTTON_TYPES["CANCEL"]):
+                eventbus.emit(PatternEnable())
+                self._leds_active = False
+                self.minimise()
+                return True
+            for name in ("CONFIRM", "UP", "DOWN", "LEFT", "RIGHT"):
+                if b.pressed(BUTTON_TYPES[name]):
+                    self.help_open = False
+                    self.button_states.clear()
+                    break
             return True
         b = self.button_states
         # Rotation lives on CONFIRM/LEFT (physical C bottom-right / E
@@ -285,6 +306,10 @@ class Circuli(app.App):
     def draw(self, ctx):
         ctx.save()
         ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
+        if self.help_open:
+            self._draw_help(ctx)
+            ctx.restore()
+            return
         self._draw_top_reference(ctx)
         engaged_outer, engaged_inner = self._engaged_teeth()
         for i in range(self.machine.rings):
@@ -326,6 +351,45 @@ class Circuli(app.App):
             ctx.begin_path()
             ctx.move_to(0, y)
             ctx.text("%sr%d %d" % (">" if selected else "", i, self.game.positions[i]))
+
+    def _draw_help(self, ctx):
+        # Launch instruction page; any game button dismisses it (F exits).
+        ctx.text_align = ctx.CENTER
+        ctx.text_baseline = ctx.MIDDLE
+        ctx.rgb(1.0, 0.9, 0.2)
+        ctx.font_size = 26
+        ctx.begin_path()
+        ctx.move_to(0, -74)
+        ctx.text("CIRCULI")
+        ctx.rgb(1.0, 1.0, 1.0)
+        ctx.font_size = 14
+        goal = (
+            "Rotate rings until every",
+            "yellow mark sits under",
+            "the dotted line.",
+            "Teeth catch and drag",
+            "neighbouring rings!",
+        )
+        for i, line in enumerate(goal):
+            ctx.begin_path()
+            ctx.move_to(0, -44 + i * 16)
+            ctx.text(line)
+        ctx.rgb(0.7, 0.7, 0.7)
+        ctx.font_size = 13
+        controls = (
+            "C / E  rotate ring",
+            "A / D  select ring",
+            "B  new puzzle    F  exit",
+        )
+        for i, line in enumerate(controls):
+            ctx.begin_path()
+            ctx.move_to(0, 46 + i * 15)
+            ctx.text(line)
+        ctx.rgb(0.45, 0.45, 0.45)
+        ctx.font_size = 12
+        ctx.begin_path()
+        ctx.move_to(0, 96)
+        ctx.text("press any key")
 
     def _draw_key_hints(self, ctx):
         # Compact reminders at the physical button angles: C (+30) rotates CW,
@@ -432,7 +496,7 @@ class Circuli(app.App):
         selected = i == self.selected
         color = self._ring_color(i, selected)
 
-        ctx.line_width = 5 if selected else 3
+        ctx.line_width = self.ring_stroke + (2 if selected else 0)
         ctx.rgb(*color)
         ctx.begin_path()
         ctx.arc(0, 0, r, 0, 2 * math.pi, False)
@@ -456,7 +520,7 @@ class Circuli(app.App):
         a = _slot_angle(self.machine, p)
         half = MARKER_LEN / (2 * r)
         ctx.rgb(1.0, 0.9, 0.2)
-        ctx.line_width = (5 if i == self.selected else 3) + 2
+        ctx.line_width = self.ring_stroke + (4 if i == self.selected else 2)
         ctx.begin_path()
         ctx.arc(0, 0, r, a - half, a + half, False)
         ctx.stroke()
