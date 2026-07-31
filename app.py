@@ -9,7 +9,7 @@ from system.eventbus import eventbus
 from system.patterndisplay.events import PatternDisable, PatternEnable
 from tildagonos import tildagonos
 
-from .game import Game, random_machine
+from .game import Game, random_machine, start_is_scrambled
 
 DEBUG = False           # centre readout of ring slots and current selection
 
@@ -119,12 +119,13 @@ class Circuli(app.App):
     def _new_puzzle(self, ring_count=None):
         if ring_count is not None:
             self.ring_count = ring_count
-        # A machine with no catch-free moves scrambles to solved; reroll.
+        # Reroll machines whose walk could not produce a properly scrambled
+        # start (no ring on the target, no adjacent pair mutually aligned).
         while True:
             self.machine = random_machine(random, self.ring_count)
             self.game = Game(self.machine)
             self.game.scramble(random)
-            if not self.game.is_solved():
+            if start_is_scrambled(self.game.positions):
                 break
         self._layout()
         self.selected = 0
@@ -415,6 +416,12 @@ class Circuli(app.App):
         ctx.stroke()
 
     def _draw_cracked(self, ctx):
+        # Knockout disc: the text spans the rings, so clear a circle behind
+        # it to keep it legible.
+        ctx.rgb(0, 0, 0)
+        ctx.begin_path()
+        ctx.arc(0, 0, 66, 0, 2 * math.pi, False)
+        ctx.fill()
         ctx.rgb(*SOLVED_COLOR)
         ctx.font_size = 24
         ctx.text_align = ctx.CENTER
