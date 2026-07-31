@@ -13,6 +13,7 @@ from game import (
     default_machine,
     is_valid,
     random_machine,
+    reversible_moves,
     start_is_scrambled,
 )
 
@@ -206,6 +207,29 @@ class RandomMachineTest(unittest.TestCase):
 
 
 ALL_TIERS = (3, 4, 5, 6, 7, 8)
+
+
+class ReversibleChurnTest(unittest.TestCase):
+    def test_reversible_churn_preserves_solvability(self):
+        # The vortex burst punishes button-mashing with random moves, but
+        # draws them only from reversible_moves: churning a catalogue start
+        # must leave the board solvable (within original distance + churns).
+        cat = load_catalogue(3)
+        rng = random.Random(99)
+        churns = 6
+        for _ in range(5):
+            p = cat["puzzles"][rng.randrange(len(cat["puzzles"]))]
+            m = Machine(p["inner"], p["outer"], cat["slots"])
+            game = Game(m, p["start"])
+            for _ in range(churns):
+                options = reversible_moves(m, game.positions)
+                self.assertTrue(options)
+                ring, d, _result = options[rng.randrange(len(options))]
+                game.rotate(ring, d)
+            self.assertIsNotNone(
+                solve_distance(m, game.positions, p["dist"] + churns),
+                "churned start became unsolvable: %r" % (game.positions,),
+            )
 
 
 class CatalogueTest(unittest.TestCase):

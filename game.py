@@ -129,6 +129,34 @@ def start_is_scrambled(positions):
 
 
 
+def reversible_moves(machine, positions):
+    """Every (ring, direction, result) move from `positions` that some single
+    move provably undoes. Applying only such moves preserves solvability: each
+    step has a way back, so from a solvable state the result stays solvable.
+
+    Atomic moves in general are NOT invertible (a catch that drags neighbours
+    is not always undone by the counter-rotation), so each candidate's undo is
+    found by checking all single moves from its result.
+    """
+    pos = tuple(positions)
+    moves = []
+    for ring in range(machine.rings):
+        for d in (1, -1):
+            result = _apply(machine, pos, ring, d)
+            undone = _apply(machine, result, ring, -d) == pos
+            if not undone:
+                for r2 in range(machine.rings):
+                    for d2 in (1, -1):
+                        if _apply(machine, result, r2, d2) == pos:
+                            undone = True
+                            break
+                    if undone:
+                        break
+            if undone:
+                moves.append((ring, d, result))
+    return moves
+
+
 # Binary level catalogue (written by tools/generate_catalogue.py):
 # header "CL1" + slots(1B) + rings(1B) + count(2B LE), then fixed-size
 # records of dist(1B) + split(1B, 0 = not a composite) + one start byte per
