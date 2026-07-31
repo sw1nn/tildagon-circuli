@@ -233,14 +233,16 @@ class Circuli(app.App):
     def _draw_key_hints(self, ctx):
         # Compact reminders at the physical button angles: C (+30) rotates CW,
         # E (+150) rotates CCW, A (top) selects outward, D (bottom) inward.
-        # The A chevron sits 15 degrees clockwise of 12 o'clock so it clears
-        # the fixed target marker.
+        # The A chevron sits 15 degrees clockwise of 12 o'clock so it stays
+        # clear of the target line's axis.
         ctx.rgb(*HINT_COLOR)
         ctx.line_width = 2
         self._hint_arc_arrow(ctx, math.radians(30), cw=True)
         self._hint_arc_arrow(ctx, math.radians(150), cw=False)
+        # Both chevrons point radially outward: at the top that reads as an
+        # up arrow, at the bottom as a down arrow.
         self._hint_chevron(ctx, math.radians(-75), outward=True)
-        self._hint_chevron(ctx, math.radians(90), outward=False)
+        self._hint_chevron(ctx, math.radians(90), outward=True)
 
     def _hint_arc_arrow(self, ctx, angle, cw):
         # A short arc concentric with the rings, with a filled arrowhead on
@@ -273,11 +275,20 @@ class Circuli(app.App):
         ctx.stroke()
 
     def _draw_top_reference(self, ctx):
-        # Fixed target marker at the top, pointing down toward the rings.
-        angle = _slot_angle(self.machine, 0)
-        r = self.radii[-1] + self.tooth_len + self.marker_size + 6
+        # Dotted target line at 12 o'clock spanning the ring band, drawn under
+        # the rings; the puzzle is solved when every marker points along it.
         ctx.rgb(1.0, 0.9, 0.2)
-        _triangle(ctx, r, angle, self.marker_size, outward=False)
+        ctx.line_width = 2
+        dash, gap = 3, 4
+        y = -self.radii[0]
+        y_end = -self.radii[-1]
+        while y > y_end:
+            e = max(y - dash, y_end)
+            ctx.begin_path()
+            ctx.move_to(0, y)
+            ctx.line_to(0, e)
+            ctx.stroke()
+            y -= dash + gap
 
     def _ring_color(self, i, selected):
         if self.solved:
