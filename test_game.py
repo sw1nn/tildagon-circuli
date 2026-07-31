@@ -2,7 +2,14 @@ import random
 import unittest
 from itertools import product
 
-from game import Game, Machine, default_machine, is_valid
+from game import (
+    Game,
+    Machine,
+    default_machine,
+    is_valid,
+    random_machine,
+    scramble_walk,
+)
 
 
 def reaches_solved(machine, start):
@@ -144,6 +151,34 @@ class SolvedTest(unittest.TestCase):
         self.assertFalse(Game(bare_machine(), positions=[0, 1, 0]).is_solved())
 
 
+class RandomMachineTest(unittest.TestCase):
+    def test_random_machines_are_valid_at_rest_with_bounded_teeth(self):
+        for rings in (3, 4, 5):
+            for seed in range(30):
+                rng = random.Random(seed)
+                m = random_machine(rng, rings)
+                self.assertEqual(m.rings, rings)
+                self.assertEqual(m.slots, 12)
+                # Decorative rims carry no teeth.
+                self.assertEqual(m.inner_teeth[0], [])
+                self.assertEqual(m.outer_teeth[-1], [])
+                # The solved state must be physically possible.
+                self.assertTrue(is_valid(m, [0] * rings))
+                for gap in range(rings - 1):
+                    outer = m.outer_teeth[gap]
+                    inner = m.inner_teeth[gap + 1]
+                    self.assertTrue(1 <= len(outer) <= 3)
+                    self.assertTrue(1 <= len(inner) <= 3)
+                    combined = outer + inner
+                    self.assertEqual(
+                        len(combined),
+                        len(set(combined)),
+                        "gap %d shares a slot: %r" % (gap, combined),
+                    )
+                    for t in combined:
+                        self.assertTrue(0 <= t < m.slots)
+
+
 class ScrambleTest(unittest.TestCase):
     def test_scramble_is_never_already_solved(self):
         machine = default_machine()
@@ -151,16 +186,6 @@ class ScrambleTest(unittest.TestCase):
             game = Game(machine)
             game.scramble(random.Random(seed))
             self.assertFalse(game.is_solved(), "seed %d produced a solved start" % seed)
-
-    def test_scramble_is_always_solvable(self):
-        machine = default_machine()
-        for seed in range(25):
-            game = Game(machine)
-            game.scramble(random.Random(seed))
-            self.assertTrue(
-                reaches_solved(machine, game.positions),
-                "seed %d produced an unsolvable start: %r" % (seed, game.positions),
-            )
 
     def test_scramble_never_starts_in_an_overlapping_state(self):
         machine = default_machine()
@@ -170,6 +195,37 @@ class ScrambleTest(unittest.TestCase):
             self.assertTrue(
                 is_valid(machine, game.positions),
                 "seed %d produced overlapping teeth: %r" % (seed, game.positions),
+            )
+
+    def test_walk_scramble_reverses_back_to_solved(self):
+        # Constructive solvability proof: undoing the walk's moves in reverse
+        # order must land exactly on solved, at every ring count.
+        for rings in (3, 4, 5):
+            for seed in range(30):
+                rng = random.Random(seed * 31 + rings)
+                m = random_machine(rng, rings)
+                pos, path = scramble_walk(m, rng, 5 * rings)
+                self.assertTrue(is_valid(m, pos))
+                game = Game(m, list(pos))
+                for ring, d in reversed(path):
+                    game.rotate(ring, -d)
+                self.assertTrue(
+                    game.is_solved(),
+                    "rings %d seed %d: reverse replay ended at %r"
+                    % (rings, seed, game.positions),
+                )
+
+    def test_scrambled_random_machine_reaches_solved_by_search(self):
+        # Independent oracle cross-check on the smallest ring count, where
+        # breadth-first search stays cheap.
+        for seed in range(5):
+            rng = random.Random(seed)
+            m = random_machine(rng, 3)
+            game = Game(m)
+            game.scramble(rng)
+            self.assertTrue(
+                reaches_solved(m, game.positions),
+                "seed %d produced an unsolvable start: %r" % (seed, game.positions),
             )
 
 

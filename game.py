@@ -18,7 +18,6 @@ class Machine:
         self.outer_teeth = [list(t) for t in outer_teeth]
         self.slots = slots
         self.rings = len(inner_teeth)
-        self._solvable = None
 
 
 def default_machine():
@@ -33,6 +32,26 @@ def default_machine():
         outer_teeth=[[0, 4, 8], [1, 5, 9], [0]],
         slots=12,
     )
+
+
+def random_machine(rng, rings, slots=12):
+    """A random safe: each shared gap gets 1..3 outer and 1..3 inner teeth at
+    distinct random slots, so nothing overlaps at rest and the solved state is
+    valid by construction. The decorative rims (innermost inner, outermost
+    outer) stay empty. Uses only rng.randrange, which MicroPython provides."""
+    inner_teeth = [[] for _ in range(rings)]
+    outer_teeth = [[] for _ in range(rings)]
+    for gap in range(rings - 1):
+        n_outer = 1 + rng.randrange(3)
+        n_inner = 1 + rng.randrange(3)
+        picked = []
+        while len(picked) < n_outer + n_inner:
+            slot = rng.randrange(slots)
+            if slot not in picked:
+                picked.append(slot)
+        outer_teeth[gap] = sorted(picked[:n_outer])
+        inner_teeth[gap + 1] = sorted(picked[n_outer:])
+    return Machine(inner_teeth, outer_teeth, slots)
 
 
 def is_valid(machine, positions):
@@ -90,60 +109,48 @@ def _apply(machine, positions, ring, direction):
     return tuple(pos)
 
 
-def _all_states(n, s):
-    """Yield every ring-position tuple, odometer order."""
-    state = [0] * n
-    while True:
-        yield tuple(state)
-        i = 0
-        while i < n:
-            state[i] += 1
-            if state[i] < s:
-                break
-            state[i] = 0
-            i += 1
-        else:
-            return
+def _catch_free_moves(machine, pos):
+    """Every (ring, direction, result) move from `pos` that turns exactly the
+    driven ring, dragging nothing."""
+    moves = []
+    for ring in range(machine.rings):
+        for d in (1, -1):
+            new = _apply(machine, pos, ring, d)
+            moved = 0
+            for a, b in zip(new, pos):
+                if a != b:
+                    moved += 1
+            if moved == 1:
+                moves.append((ring, d, new))
+    return moves
 
 
-def solvable_states(machine):
-    """Map every state from which the solved state is reachable to its shortest
-    distance (in moves) to solved. Computed once per machine and cached.
+def scramble_walk(machine, rng, moves):
+    """Random walk of `moves` catch-free single-ring turns from solved.
 
-    Atomic moves are not invertible (a catch that drags neighbours cannot be
-    undone by a single counter-rotation), so solvability is established by
-    reverse breadth-first search from solved over the real move graph rather
-    than assumed from reversibility.
+    A catch-free move is reversible: the counter-turn returns the ring to a
+    slot arrangement that was just valid, and cannot itself catch. So every
+    state the walk reaches is solvable by construction — undo the path in
+    reverse. Returns (positions, path) where path is the [(ring, direction)]
+    list actually applied. If the walk wraps back onto solved it keeps going
+    within a small allowance; if a state offers no catch-free move (rare on
+    degenerate machines) the walk ends early, and the caller should reroll.
+
+    Atomic moves in general are NOT invertible (a catch that drags neighbours
+    cannot be undone by a single counter-rotation), which is why the walk is
+    restricted to catch-free moves instead of sampling arbitrary ones.
     """
-    if machine._solvable is not None:
-        return machine._solvable
-    n = machine.rings
-    s = machine.slots
-    solved = tuple([0] * n)
-    preds = {}
-    for state in _all_states(n, s):
-        if not is_valid(machine, state):
-            continue
-        for ring in range(n):
-            for d in (1, -1):
-                succ = _apply(machine, state, ring, d)
-                bucket = preds.get(succ)
-                if bucket is None:
-                    bucket = set()
-                    preds[succ] = bucket
-                bucket.add(state)
-    dist = {solved: 0}
-    frontier = [solved]
-    while frontier:
-        nxt = []
-        for st in frontier:
-            for p in preds.get(st, ()):
-                if p not in dist:
-                    dist[p] = dist[st] + 1
-                    nxt.append(p)
-        frontier = nxt
-    machine._solvable = dist
-    return dist
+    solved = tuple([0] * machine.rings)
+    pos = solved
+    path = []
+    allowance = moves + 8
+    while (len(path) < moves or pos == solved) and len(path) < allowance:
+        options = _catch_free_moves(machine, pos)
+        if not options:
+            break
+        ring, d, pos = options[rng.randrange(len(options))]
+        path.append((ring, d))
+    return pos, path
 
 
 class Game:
@@ -165,13 +172,13 @@ class Game:
                 return False
         return True
 
-    def scramble(self, rng, min_distance=6):
-        """Set positions to a guaranteed-solvable, not-already-solved start.
+    def scramble(self, rng, moves=None):
+        """Set positions to a guaranteed-solvable start via a catch-free walk.
 
-        Prefers states at least `min_distance` moves from solved; falls back to
-        any solvable non-solved state if none are that far.
+        May leave the game solved only if the machine offers no catch-free
+        moves at all; callers roll a fresh machine in that case.
         """
-        dist = solvable_states(self.machine)
-        hard = [st for st, d in dist.items() if d >= min_distance]
-        pool = hard if hard else [st for st, d in dist.items() if d > 0]
-        self.positions = list(pool[rng.randrange(len(pool))])
+        if moves is None:
+            moves = 5 * self.machine.rings
+        pos, _path = scramble_walk(self.machine, rng, moves)
+        self.positions = list(pos)
