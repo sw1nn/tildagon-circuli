@@ -21,7 +21,6 @@ TOOTH_HALF_W = 0.12     # angular half-width of a tooth, radians
 MARKER_SIZE = 11
 SOLVED_COLOR = (0.2, 1.0, 0.3)
 ENGAGED_COLOR = (1.0, 1.0, 1.0)  # teeth currently catching an opposing tooth
-LINK_COLOR = (0.2, 0.9, 1.0)     # dotted connector between interlocked teeth
 
 
 def _slot_angle(machine, v):
@@ -61,22 +60,6 @@ def _triangle(ctx, r_base, angle, size, outward=True):
     ctx.close_path()
     ctx.fill()
 
-
-def _dotted_line(ctx, x0, y0, x1, y1, dash=3, gap=4):
-    """Stroke a dashed line from (x0,y0) to (x1,y1)."""
-    dx, dy = x1 - x0, y1 - y0
-    length = math.sqrt(dx * dx + dy * dy)
-    if length == 0:
-        return
-    ux, uy = dx / length, dy / length
-    d = 0.0
-    while d < length:
-        a, e = d, min(d + dash, length)
-        ctx.begin_path()
-        ctx.move_to(x0 + ux * a, y0 + uy * a)
-        ctx.line_to(x0 + ux * e, y0 + uy * e)
-        ctx.stroke()
-        d += dash + gap
 
 
 class Circuli(app.App):
@@ -152,16 +135,14 @@ class Circuli(app.App):
         return True
 
     def _engaged_teeth(self):
-        """Return (engaged_outer, engaged_inner, pairs): per-ring sets of tooth
+        """Return (engaged_outer, engaged_inner): per-ring sets of tooth
         offsets that sit within one slot of an opposing tooth in a shared gap
-        (currently catching), plus the interlocked (gap, outer_slot, inner_slot)
-        pairs for drawing connectors."""
+        (currently catching)."""
         m = self.machine
         pos = self.game.positions
         s = m.slots
         engaged_outer = [set() for _ in range(m.rings)]
         engaged_inner = [set() for _ in range(m.rings)]
-        pairs = []
         for i in range(m.rings - 1):
             j = i + 1
             for o in m.outer_teeth[i]:
@@ -171,18 +152,15 @@ class Circuli(app.App):
                     if _circular_dist(oa, ia, s) <= 1:
                         engaged_outer[i].add(o)
                         engaged_inner[j].add(k)
-                        pairs.append((i, oa, ia))
-        return engaged_outer, engaged_inner, pairs
+        return engaged_outer, engaged_inner
 
     def draw(self, ctx):
         ctx.save()
         ctx.rgb(0, 0, 0).rectangle(-120, -120, 240, 240).fill()
         self._draw_top_reference(ctx)
-        engaged_outer, engaged_inner, pairs = self._engaged_teeth()
+        engaged_outer, engaged_inner = self._engaged_teeth()
         for i in range(self.machine.rings):
             self._draw_ring(ctx, i, engaged_outer[i], engaged_inner[i])
-        if not self.solved:
-            self._draw_links(ctx, pairs)
         # Draw every alignment indicator last, so notches from neighbouring
         # rings can never obscure it.
         for i in range(self.machine.rings):
@@ -256,21 +234,6 @@ class Circuli(app.App):
             tc = ENGAGED_COLOR if (not self.solved and off in engaged_inner) else color
             ctx.rgb(*tc)
             _tooth(ctx, r - TOOTH_LEN, r, _slot_angle(m, p + off), TOOTH_HALF_W)
-
-    def _draw_links(self, ctx, pairs):
-        # Dotted line across the gap joining each pair of interlocked teeth.
-        m = self.machine
-        ctx.rgb(*LINK_COLOR)
-        ctx.line_width = 2
-        for i, oa, ia in pairs:
-            ao, ai = _slot_angle(m, oa), _slot_angle(m, ia)
-            r_out = RING_RADII[i] + TOOTH_LEN
-            r_in = RING_RADII[i + 1] - TOOTH_LEN
-            _dotted_line(
-                ctx,
-                r_out * math.cos(ao), r_out * math.sin(ao),
-                r_in * math.cos(ai), r_in * math.sin(ai),
-            )
 
     def _draw_marker(self, ctx, i):
         # Alignment marker (ring-frame offset 0), tip pointing outward.
