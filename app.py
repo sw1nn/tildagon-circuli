@@ -35,7 +35,7 @@ INACTIVE_COLOR = (0.5, 0.5, 0.5)  # rings that are not currently selected
 SOLVED_COLOR = (0.2, 1.0, 0.3)
 ENGAGED_COLOR = (1.0, 1.0, 1.0)  # teeth currently catching an opposing tooth
 
-HINT_COLOR = (0.45, 0.45, 0.45)  # edge glyphs reminding what the keys do
+HINT_COLOR = (1.0, 1.0, 1.0)  # edge glyphs reminding what the keys do
 HINT_R = 115
 
 LED_COUNT = 12
@@ -297,15 +297,13 @@ class Circuli(app.App):
     def _draw_key_hints(self, ctx):
         # Compact reminders at the physical button angles: C (+30) rotates CW,
         # E (+150) rotates CCW, A (top) selects outward, D (bottom) inward.
-        # The A chevron sits 15 degrees clockwise of 12 o'clock so it stays
-        # clear of the target line's axis.
         ctx.rgb(*HINT_COLOR)
         ctx.line_width = 2
         self._hint_arc_arrow(ctx, math.radians(30), cw=True)
         self._hint_arc_arrow(ctx, math.radians(150), cw=False)
         # Both chevrons point radially outward: at the top that reads as an
         # up arrow, at the bottom as a down arrow.
-        self._hint_chevron(ctx, math.radians(-75), outward=True)
+        self._hint_chevron(ctx, math.radians(-90), outward=True)
         self._hint_chevron(ctx, math.radians(90), outward=True)
 
     def _hint_arc_arrow(self, ctx, angle, cw):
