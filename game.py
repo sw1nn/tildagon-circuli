@@ -13,25 +13,15 @@ class Machine:
     inner_teeth[i] / outer_teeth[i] are the slot offsets of ring i's inner and
     outer rim teeth. Only ring i's outer teeth and ring i+1's inner teeth share
     a gap and can catch on each other.
-
-    ratchet[i] restricts ring i's travel: 0 turns either way, +1 clockwise only,
-    -1 counter-clockwise only. A restricted ring anchors any cascade group that
-    would carry it the wrong way, refusing the move outright.
     """
 
-    def __init__(self, inner_teeth, outer_teeth, slots=12, ratchet=None):
+    def __init__(self, inner_teeth, outer_teeth, slots=12):
         if len(inner_teeth) != len(outer_teeth):
             raise ValueError("inner_teeth and outer_teeth must cover the same rings")
         self.inner_teeth = [list(t) for t in inner_teeth]
         self.outer_teeth = [list(t) for t in outer_teeth]
         self.slots = slots
         self.rings = len(inner_teeth)
-        if ratchet is None:
-            self.ratchet = [0] * self.rings
-        elif len(ratchet) != self.rings:
-            raise ValueError("ratchet must cover every ring")
-        else:
-            self.ratchet = list(ratchet)
 
 
 def default_machine():
@@ -59,16 +49,12 @@ def random_machine(
     slots=12,
     teeth_min=TEETH_MIN,
     teeth_max=TEETH_MAX,
-    ratchet_count=0,
 ):
     """A random safe: each shared gap gets teeth_min..teeth_max outer and
     inner teeth at distinct random slots, so nothing overlaps at rest and the
     solved state is valid by construction. The decorative rims (innermost
-    inner, outermost outer) stay empty. `ratchet_count` rings are picked at
-    random to become one-way, each in a random direction. Uses only
-    rng.randrange, which MicroPython provides."""
-    if ratchet_count > rings:
-        raise ValueError("ratchet_count must not exceed rings")
+    inner, outermost outer) stay empty. Uses only rng.randrange, which
+    MicroPython provides."""
     inner_teeth = [[] for _ in range(rings)]
     outer_teeth = [[] for _ in range(rings)]
     span = teeth_max - teeth_min + 1
@@ -82,15 +68,7 @@ def random_machine(
                 picked.append(slot)
         outer_teeth[gap] = sorted(picked[:n_outer])
         inner_teeth[gap + 1] = sorted(picked[n_outer:])
-    ratchet = [0] * rings
-    chosen = []
-    while len(chosen) < ratchet_count:
-        r = rng.randrange(rings)
-        if r not in chosen:
-            chosen.append(r)
-    for r in chosen:
-        ratchet[r] = 1 if rng.randrange(2) else -1
-    return Machine(inner_teeth, outer_teeth, slots, ratchet)
+    return Machine(inner_teeth, outer_teeth, slots)
 
 
 def is_valid(machine, positions):
@@ -106,13 +84,16 @@ def is_valid(machine, positions):
     return True
 
 
-def _would_collide(machine, pos, i, j, group, direction):
-    """Would ring i's outer teeth land on ring j's (=i+1) inner teeth, with the
-    rings currently in `group` shifted by `direction`?"""
+def _would_collide(machine, pos, i, j, sign, direction):
+    """Would ring i's outer teeth land on ring j's (=i+1) inner teeth, given
+    the travel each ring is currently assigned? A ring with sign 0 is not yet
+    part of the cascade and is treated as stationary."""
     s = machine.slots
-    pi = pos[i] + (direction if i in group else 0)
-    pj = pos[j] + (direction if j in group else 0)
-    outer = {(pi + t) % s for t in machine.outer_teeth[i]}
+    pi = pos[i] + direction * sign[i]
+    pj = pos[j] + direction * sign[j]
+    outer = set()
+    for t in machine.outer_teeth[i]:
+        outer.add((pi + t) % s)
     for t in machine.inner_teeth[j]:
         if (pj + t) % s in outer:
             return True
@@ -121,37 +102,40 @@ def _would_collide(machine, pos, i, j, group, direction):
 
 def _apply(machine, positions, ring, direction):
     """Return the new positions after rotating `ring` one step in `direction`,
-    or None if the machine jams.
+    or None if the gears bind.
 
-    Gathers every ring that would catch in the direction of motion into one
-    rigid group (cascading inward and outward), then turns the whole group
-    together. A ratcheted ring anywhere in the finished group refuses to travel
-    against its permitted direction and anchors the entire group, so the move
-    is refused rather than partially applied. Pure: does not mutate `positions`.
+    Meshing teeth turn their neighbour the opposite way, so signs alternate
+    outward from the driven ring through the whole cascade. Because
+    counter-rotating neighbours close on each other rather than travelling
+    together, a cascade can drive teeth into the same slot; that state is
+    physically impossible, so the move is refused rather than applied.
+    Pure: does not mutate `positions`.
     """
     n = machine.rings
     s = machine.slots
-    pos = list(positions)
-    group = set()
-    group.add(ring)
+    sign = [0] * n
+    sign[ring] = 1
     grew = True
     while grew:
         grew = False
         for i in range(n - 1):
             j = i + 1
-            i_in = i in group
-            j_in = j in group
-            if i_in == j_in:
+            if (sign[i] != 0) == (sign[j] != 0):
                 continue
-            if _would_collide(machine, pos, i, j, group, direction):
-                group.add(i if j_in else j)
+            if _would_collide(machine, positions, i, j, sign, direction):
+                if sign[i] != 0:
+                    sign[j] = -sign[i]
+                else:
+                    sign[i] = -sign[j]
                 grew = True
-    for r in group:
-        if machine.ratchet[r] and machine.ratchet[r] != direction:
-            return None
-    for r in group:
-        pos[r] = (pos[r] + direction) % s
-    return tuple(pos)
+    pos = list(positions)
+    for r in range(n):
+        if sign[r]:
+            pos[r] = (pos[r] + direction * sign[r]) % s
+    result = tuple(pos)
+    if not is_valid(machine, result):
+        return None
+    return result
 
 
 def start_is_scrambled(positions):
@@ -327,9 +311,9 @@ class Game:
             self.positions = list(positions)
 
     def rotate(self, ring, direction):
-        """Rotate `ring` one step in `direction` (+1 CW, -1 CCW), dragging any
-        rings it catches. Returns False and leaves the board untouched when a
-        ratcheted ring in the cascade jams the move."""
+        """Rotate `ring` one step in `direction` (+1 CW, -1 CCW), turning any
+        ring it catches the opposite way. Returns False and leaves the board
+        untouched when the cascade would bind teeth into the same slot."""
         result = _apply(self.machine, self.positions, ring, direction)
         if result is None:
             return False
