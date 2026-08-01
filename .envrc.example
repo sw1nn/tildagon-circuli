@@ -1,0 +1,17 @@
+#!/bin/bash
+# Copy this file to .envrc, adjust if needed, then run `direnv allow`.
+#
+# pyrightconfig.json cannot expand environment variables, so the simulator
+# location is materialised as a stable `.sim` symlink that `extraPaths`
+# points at. By default it targets a spaceagon checkout two levels up (the
+# layout when this repo is checked out as the apps/circuli submodule). Set
+# TILDAGON_SIM_PATH to the simulator tree to override, e.g. in a standalone
+# checkout:
+#
+#   export TILDAGON_SIM_PATH=$HOME/workspace/sw1nn/spaceagon/.sim
+
+# Pull in the parent environment (the spaceagon flake dev shell) when this
+# checkout lives inside the spaceagon tree.
+source_up_if_exists
+
+ln --symbolic --force --no-dereference "${TILDAGON_SIM_PATH:-../../.sim}" .sim

@@ -1,14 +1,17 @@
 {
     // app.py imports Tildagon firmware modules (app, events, system,
-    // tildagonos) and the simulator's imu fake. These paths resolve inside a
-    // badge development environment that materialises the simulator two
-    // levels up; without one the firmware imports simply stay unresolved,
-    // which is harmless — game.py, motion.py, and the tests are pure Python.
+    // tildagonos) and the simulator's imu fake. These resolve through the
+    // .sim symlink maintained by .envrc (see .envrc.example), which defaults
+    // to a spaceagon checkout two levels up and can be overridden with
+    // TILDAGON_SIM_PATH. Without a simulator the firmware imports simply
+    // stay unresolved, which is harmless — game.py, motion.py, and the
+    // tests are pure Python.
     "extraPaths": [
-        "../../.sim/modules",
-        "../../.sim/sim/fakes"
+        ".sim/modules",
+        ".sim/sim/fakes"
     ],
     "exclude": [
+        ".sim",
         "**/__pycache__"
     ],
     "typeCheckingMode": "basic"

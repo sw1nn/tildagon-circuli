@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+
+# Local direnv config (copy .envrc.example) and the simulator symlink it maintains
+.envrc
+.sim
