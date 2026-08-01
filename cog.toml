@@ -1,0 +1,24 @@
+tag_prefix = "v"
+branch_whitelist = ["main"]
+ignore_merge_commits = true
+
+pre_bump_hooks = [
+    "ruff check .",
+    "just test",
+    '''sh -c "sed --in-place 's/^version = .*/version = \"{{version}}\"/' tildagon.toml"''',
+    '''sh -c "sed --in-place 's/\"version\": \".*\"/\"version\": \"{{version}}\"/' metadata.json"''',
+]
+
+post_bump_hooks = [
+    "git push origin main v{{version}}",
+    "git push github main v{{version}}",
+    '''sh -c "cog changelog --at v{{version}} | gh release create v{{version}} --notes-file -"''',
+]
+
+[changelog]
+path = "CHANGELOG.md"
+template = "remote"
+remote = "github.com"
+owner = "sw1nn"
+repository = "tildagon-circuli"
+authors = [{ signature = "Neale Swinnerton", username = "sw1nn" }]
