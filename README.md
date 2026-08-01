@@ -15,10 +15,10 @@ Something lives in the gap at the centre of the rings. Players who lean on the s
 | C (bottom-right) | Rotate the selected ring clockwise |
 | E (bottom-left) | Rotate the selected ring anticlockwise |
 | A / D (top / bottom) | Select the next ring outward / inward |
-| B (top-right) | New puzzle (asks for confirmation mid-game) |
+| B (top-right) | Game menu: new puzzle, reset level, restart game |
 | F (top-left) | Exit to launcher |
 
-In the new-puzzle confirmation, C answers **Yes** and F answers **No**, as labelled on screen.
+The game menu (*QUID NUNC?*) offers **C** NOVUM — a fresh puzzle at the current level, **A** ITERUM — this puzzle back to its starting scramble, and **E** AB INITIO — restart at 3 rings with the tally cleared; **F** backs out. On a solved board B skips the victory sweep and advances immediately.
 
 ## How the rings catch
 

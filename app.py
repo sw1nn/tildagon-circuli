@@ -3,7 +3,6 @@ import random
 import time
 
 import app
-from app_components import YesNoDialog
 from events.input import Buttons, BUTTON_TYPES
 from system.eventbus import eventbus
 from system.patterndisplay.events import PatternDisable, PatternEnable
@@ -122,8 +121,7 @@ class Circuli(app.App):
         self.button_states = Buttons(self)
         random.seed(time.ticks_ms())
         self.t = 0
-        self.dialog = None
-        self.page = "help"  # launch flow: help -> mode chooser -> game
+        self.page = "help"  # pages: help -> mode chooser -> game (or menu)
         self.motu = False
         self._twist = None
         self._tilt = None
@@ -187,6 +185,7 @@ class Circuli(app.App):
         self._last_pick[self.ring_count] = pick
         inner, outer, start, _dist, _split = catalogue_entry(data, pick)
         self.machine = Machine(inner, outer, slots)
+        self._puzzle_start = list(start)
         self.game = Game(self.machine, start)
         self._layout()
         self.selected = 0
@@ -264,29 +263,31 @@ class Circuli(app.App):
 
     def _request_new_puzzle(self):
         # A solved board advances the progression with nothing to lose (B
-        # skips the victory sweep); mid-game a scramble throws away progress,
-        # so ask first.
+        # skips the victory sweep); mid-game B opens the game menu instead,
+        # which doubles as the are-you-sure step (F backs out).
         if self.solved:
             self._new_puzzle(min(self.ring_count + 1, MAX_RINGS))
             self._show_tally()
             return
-        self._needs_render = True
-        self.dialog = YesNoDialog(
-            "New puzzle?",
-            self,
-            on_yes=self._scramble_confirmed,
-            on_no=self._close_dialog,
-        )
-
-    def _scramble_confirmed(self):
-        self._new_puzzle()
-        self._close_dialog()
-
-    def _close_dialog(self):
-        self.dialog = None
-        self._needs_render = True
-        # Presses that answered the dialog must not leak into game input.
+        self.page = "menu"
         self.button_states.clear()
+        self._needs_render = True
+
+    def _reset_level(self):
+        """Put the current puzzle back to its starting scramble."""
+        self.game = Game(self.machine, self._puzzle_start)
+        self.solved = False
+        self._calm_vortex()
+        self._engaged = None
+        if self._twist is not None:
+            self._twist.reset()
+            self._tilt.reset()
+
+    def _restart_game(self):
+        """Back to the beginning: 3 rings, tally cleared."""
+        self.solve_count = 0
+        self._new_puzzle(START_RINGS)
+        self._show_tally()
 
     def _consume_render(self):
         """One render per state change: True exactly once, then False until
@@ -307,9 +308,6 @@ class Circuli(app.App):
             self._show_tally()
             self._leds_active = True
             self._needs_render = True
-        if self.dialog is not None:
-            # The open dialog owns the buttons; its handlers close it.
-            return True
         if self._burst_left:
             # The vortex is churning; input waits until it is spent.
             self._advance_burst(delta)
@@ -350,6 +348,26 @@ class Circuli(app.App):
                 # quiet time keep the return stroke from firing a reverse
                 # step (calibrated flicks run 300-900 deg/s).
                 self._tilt = FlickDial(fire_dps=150.0, rearm_dps=40.0, quiet_ms=400.0)
+                self.page = None
+                self.button_states.clear()
+                self._needs_render = True
+            return self._consume_render()
+        if self.page == "menu":
+            # In-game menu (opened with B): pick an action or back out.
+            b = self.button_states
+            done = False
+            if b.pressed(BUTTON_TYPES["CONFIRM"]):
+                self._new_puzzle()
+                done = True
+            elif b.pressed(BUTTON_TYPES["UP"]):
+                self._reset_level()
+                done = True
+            elif b.pressed(BUTTON_TYPES["LEFT"]):
+                self._restart_game()
+                done = True
+            elif b.pressed(BUTTON_TYPES["CANCEL"]) or b.pressed(BUTTON_TYPES["RIGHT"]):
+                done = True
+            if done:
                 self.page = None
                 self.button_states.clear()
                 self._needs_render = True
@@ -462,6 +480,10 @@ class Circuli(app.App):
             self._draw_mode(ctx)
             ctx.restore()
             return
+        if self.page == "menu":
+            self._draw_menu(ctx)
+            ctx.restore()
+            return
         self._draw_top_reference(ctx)
         if self._engaged is None:
             self._engaged = self._engaged_teeth()
@@ -482,8 +504,6 @@ class Circuli(app.App):
             self._draw_cracked(ctx)
         elif DEBUG:
             self._draw_debug(ctx)
-        if self.dialog is not None:
-            self.dialog.draw(ctx)
         ctx.restore()
 
     def _draw_debug(self, ctx):
@@ -590,6 +610,37 @@ class Circuli(app.App):
         ctx.begin_path()
         ctx.move_to(0, 78)
         ctx.text("buttons work in MOTU too")
+
+    def _draw_menu(self, ctx):
+        # In-game menu, Latin like the mode chooser (English in parens).
+        ctx.text_align = ctx.CENTER
+        ctx.text_baseline = ctx.MIDDLE
+        ctx.rgb(1.0, 0.9, 0.2)
+        ctx.font_size = 22
+        ctx.begin_path()
+        ctx.move_to(0, -70)
+        ctx.text("QUID NUNC?")
+        ctx.rgb(0.55, 0.55, 0.55)
+        ctx.font_size = 12
+        ctx.begin_path()
+        ctx.move_to(0, -50)
+        ctx.text("(game menu)")
+        ctx.rgb(1.0, 1.0, 1.0)
+        ctx.font_size = 15
+        options = (
+            "C   NOVUM (new puzzle)",
+            "A   ITERUM (reset level)",
+            "E   AB INITIO (restart)",
+        )
+        for i, line in enumerate(options):
+            ctx.begin_path()
+            ctx.move_to(0, -16 + i * 26)
+            ctx.text(line)
+        ctx.rgb(0.45, 0.45, 0.45)
+        ctx.font_size = 12
+        ctx.begin_path()
+        ctx.move_to(0, 74)
+        ctx.text("F  back")
 
     def _draw_vortex(self, ctx):
         # Something ominous in the centre gap. It grows with each repeated
