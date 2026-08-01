@@ -13,15 +13,25 @@ class Machine:
     inner_teeth[i] / outer_teeth[i] are the slot offsets of ring i's inner and
     outer rim teeth. Only ring i's outer teeth and ring i+1's inner teeth share
     a gap and can catch on each other.
+
+    ratchet[i] restricts ring i's travel: 0 turns either way, +1 clockwise only,
+    -1 counter-clockwise only. A restricted ring anchors any cascade group that
+    would carry it the wrong way, refusing the move outright.
     """
 
-    def __init__(self, inner_teeth, outer_teeth, slots=12):
+    def __init__(self, inner_teeth, outer_teeth, slots=12, ratchet=None):
         if len(inner_teeth) != len(outer_teeth):
             raise ValueError("inner_teeth and outer_teeth must cover the same rings")
         self.inner_teeth = [list(t) for t in inner_teeth]
         self.outer_teeth = [list(t) for t in outer_teeth]
         self.slots = slots
         self.rings = len(inner_teeth)
+        if ratchet is None:
+            self.ratchet = [0] * self.rings
+        elif len(ratchet) != self.rings:
+            raise ValueError("ratchet must cover every ring")
+        else:
+            self.ratchet = list(ratchet)
 
 
 def default_machine():
@@ -92,11 +102,14 @@ def _would_collide(machine, pos, i, j, group, direction):
 
 
 def _apply(machine, positions, ring, direction):
-    """Return the new positions after rotating `ring` one step in `direction`.
+    """Return the new positions after rotating `ring` one step in `direction`,
+    or None if the machine jams.
 
     Gathers every ring that would catch in the direction of motion into one
     rigid group (cascading inward and outward), then turns the whole group
-    together. Pure: does not mutate `positions`.
+    together. A ratcheted ring anywhere in the finished group refuses to travel
+    against its permitted direction and anchors the entire group, so the move
+    is refused rather than partially applied. Pure: does not mutate `positions`.
     """
     n = machine.rings
     s = machine.slots
@@ -115,6 +128,9 @@ def _apply(machine, positions, ring, direction):
             if _would_collide(machine, pos, i, j, group, direction):
                 group.add(i if j_in else j)
                 grew = True
+    for r in group:
+        if machine.ratchet[r] and machine.ratchet[r] != direction:
+            return None
     for r in group:
         pos[r] = (pos[r] + direction) % s
     return tuple(pos)
@@ -158,6 +174,8 @@ def reversible_moves(machine, positions):
     for ring in range(machine.rings):
         for d in (1, -1):
             result = _apply(machine, pos, ring, d)
+            if result is None:
+                continue
             if _has_single_undo(machine, pos, result, ring, d):
                 moves.append((ring, d, result))
     return moves
@@ -183,6 +201,8 @@ def random_reversible_move(machine, positions, rng):
         candidates[i], candidates[j] = candidates[j], candidates[i]
     for ring, d in candidates:
         result = _apply(machine, pos, ring, d)
+        if result is None:
+            continue
         if _has_single_undo(machine, pos, result, ring, d):
             return (ring, d)
     return None
@@ -242,8 +262,13 @@ class Game:
 
     def rotate(self, ring, direction):
         """Rotate `ring` one step in `direction` (+1 CW, -1 CCW), dragging any
-        rings it catches."""
-        self.positions = list(_apply(self.machine, self.positions, ring, direction))
+        rings it catches. Returns False and leaves the board untouched when a
+        ratcheted ring in the cascade jams the move."""
+        result = _apply(self.machine, self.positions, ring, direction)
+        if result is None:
+            return False
+        self.positions = list(result)
+        return True
 
     def is_solved(self):
         """True when every ring sits on slot 0, aligned with the target."""

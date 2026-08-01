@@ -103,6 +103,51 @@ def cascade_machine():
     )
 
 
+def ratchet_bare_machine():
+    """No teeth anywhere, ring 1 ratcheted clockwise-only: the cleanest case
+    of a direct turn being refused with no cascade involved."""
+    return Machine(
+        inner_teeth=[[], [], []],
+        outer_teeth=[[], [], []],
+        slots=12,
+        ratchet=[0, +1, 0],
+    )
+
+
+def dragged_machine():
+    """meshing_machine with ring 1 ratcheted clockwise-only, so the drag that
+    a clockwise push of ring 0 produces is in the permitted direction."""
+    return Machine(
+        inner_teeth=[[], [1], []],
+        outer_teeth=[[0], [], []],
+        slots=12,
+        ratchet=[0, +1, 0],
+    )
+
+
+def anchor_machine():
+    """Ring 0's outer tooth sits one slot clockwise of ring 1's inner tooth, so
+    driving ring 0 counter-clockwise drags ring 1 the same way. Ring 1 is
+    ratcheted clockwise-only, so that drag jams the whole move."""
+    return Machine(
+        inner_teeth=[[], [1], []],
+        outer_teeth=[[2], [], []],
+        slots=12,
+        ratchet=[0, +1, 0],
+    )
+
+
+def deep_anchor_machine():
+    """A counter-clockwise push of ring 0 ripples all the way to ring 2, which
+    is ratcheted clockwise-only: the far ring anchors the whole group."""
+    return Machine(
+        inner_teeth=[[], [1], [2]],
+        outer_teeth=[[2], [3], []],
+        slots=12,
+        ratchet=[0, 0, +1],
+    )
+
+
 class RotateTest(unittest.TestCase):
     def test_rotate_with_no_meshing_moves_only_driven_ring(self):
         game = Game(bare_machine(), positions=[0, 0, 0])
@@ -131,6 +176,75 @@ class RotateTest(unittest.TestCase):
         game = Game(meshing_machine(), positions=[0, 0, 0])
         game.rotate(1, -1)
         self.assertEqual(game.positions, [11, 11, 0])
+
+
+class RatchetTest(unittest.TestCase):
+    def test_a_ratcheted_ring_turns_freely_in_its_permitted_direction(self):
+        game = Game(ratchet_bare_machine(), positions=[0, 0, 0])
+        self.assertTrue(game.rotate(1, +1))
+        self.assertEqual(game.positions, [0, 1, 0])
+
+    def test_a_direct_turn_against_the_ratchet_is_refused(self):
+        game = Game(ratchet_bare_machine(), positions=[0, 5, 0])
+        self.assertFalse(game.rotate(1, -1))
+        self.assertEqual(game.positions, [0, 5, 0])
+
+    def test_free_rings_are_unaffected_by_a_neighbours_ratchet(self):
+        game = Game(ratchet_bare_machine(), positions=[0, 0, 0])
+        self.assertTrue(game.rotate(0, -1))
+        self.assertEqual(game.positions, [11, 0, 0])
+
+    def test_a_drag_in_the_permitted_direction_is_allowed(self):
+        game = Game(dragged_machine(), positions=[0, 0, 0])
+        self.assertTrue(game.rotate(0, +1))
+        self.assertEqual(game.positions, [1, 1, 0])
+
+    def test_a_drag_against_the_ratchet_jams_the_whole_move(self):
+        game = Game(anchor_machine(), positions=[0, 0, 0])
+        self.assertFalse(game.rotate(0, -1))
+        self.assertEqual(game.positions, [0, 0, 0])
+
+    def test_a_ratchet_the_cascade_never_reaches_does_not_block(self):
+        game = Game(anchor_machine(), positions=[0, 0, 0])
+        self.assertTrue(game.rotate(0, +1))
+        self.assertEqual(game.positions, [1, 0, 0])
+
+    def test_a_ratchet_deep_in_the_cascade_anchors_every_ring(self):
+        game = Game(deep_anchor_machine(), positions=[0, 0, 0])
+        self.assertFalse(game.rotate(0, -1))
+        self.assertEqual(game.positions, [0, 0, 0])
+
+    def test_the_same_deep_cascade_moves_in_the_permitted_direction(self):
+        game = Game(deep_anchor_machine(), positions=[0, 0, 0])
+        self.assertTrue(game.rotate(0, +1))
+        self.assertEqual(game.positions[0], 1)
+
+    def test_ratchet_defaults_to_every_ring_free(self):
+        self.assertEqual(bare_machine().ratchet, [0, 0, 0])
+
+    def test_ratchet_length_must_cover_every_ring(self):
+        with self.assertRaises(ValueError):
+            Machine(
+                inner_teeth=[[], [], []],
+                outer_teeth=[[], [], []],
+                slots=12,
+                ratchet=[0, +1],
+            )
+
+    def test_driven_ring_still_moves_one_slot_on_every_non_jamming_move(self):
+        machine = deep_anchor_machine()
+        s = machine.slots
+        for state in all_valid_states(machine):
+            for ring in range(machine.rings):
+                for direction in (+1, -1):
+                    game = Game(machine, list(state))
+                    if not game.rotate(ring, direction):
+                        self.assertEqual(game.positions, list(state))
+                        continue
+                    self.assertEqual(
+                        game.positions[ring], (state[ring] + direction) % s
+                    )
+                    self.assertTrue(is_valid(machine, game.positions))
 
 
 class DrivenRingInvariantTest(unittest.TestCase):
