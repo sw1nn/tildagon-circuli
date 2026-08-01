@@ -13,7 +13,7 @@ pre_bump_hooks = [
 post_bump_hooks = [
     "git push origin main v{{version}}",
     "git push github main v{{version}}",
-    '''sh -c "cog changelog --at v{{version}} | gh release create v{{version}} --notes-file -"''',
+    '''sh -c "cog changelog --at v{{version}} | gh release create v{{version}} --title v{{version}} --notes-file -"''',
 ]
 
 [changelog]
