@@ -308,12 +308,8 @@ class ReversibleChurnTest(unittest.TestCase):
                 limit = p["dist"] + churns
                 half_a = Machine(p["inner"][:k], p["outer"][:k], cat["slots"])
                 half_b = Machine(p["inner"][k:], p["outer"][k:], cat["slots"])
-                self.assertIsNotNone(
-                    solve_distance(half_a, game.positions[:k], limit)
-                )
-                self.assertIsNotNone(
-                    solve_distance(half_b, game.positions[k:], limit)
-                )
+                self.assertIsNotNone(solve_distance(half_a, game.positions[:k], limit))
+                self.assertIsNotNone(solve_distance(half_b, game.positions[k:], limit))
 
 
 class CatalogueTest(unittest.TestCase):
@@ -373,9 +369,7 @@ class CatalogueTest(unittest.TestCase):
             for _ in range(samples):
                 p = cat["puzzles"][rng.randrange(len(cat["puzzles"]))]
                 m = Machine(p["inner"], p["outer"], cat["slots"])
-                self.assertEqual(
-                    solve_distance(m, p["start"], p["dist"]), p["dist"]
-                )
+                self.assertEqual(solve_distance(m, p["start"], p["dist"]), p["dist"])
 
 
 class InvertibilityTest(unittest.TestCase):

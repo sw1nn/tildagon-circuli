@@ -18,17 +18,17 @@ try:
 except ImportError:
     imu = None
 
-DEBUG = False           # centre readout of ring slots and current selection
+DEBUG = False  # centre readout of ring slots and current selection
 
 START_RINGS = 3
-MAX_RINGS = 8           # progression cap; matches the deepest catalogue tier
+MAX_RINGS = 8  # progression cap; matches the deepest catalogue tier
 
 # Ring band. Radii are spread evenly from R_INNER to R_OUTER whatever the ring
 # count; teeth, gaps, and strokes shrink together as rings are added.
 R_INNER = 34
 R_OUTER = 102
-TOOTH_RATIO = 0.43      # tooth length as a fraction of ring spacing
-MARKER_LEN = 12         # arc length of the yellow alignment section, px
+TOOTH_RATIO = 0.43  # tooth length as a fraction of ring spacing
+MARKER_LEN = 12  # arc length of the yellow alignment section, px
 
 RING_COLORS = [
     (1.0, 0.35, 0.35),
@@ -47,32 +47,32 @@ ENGAGED_COLOR = (1.0, 1.0, 1.0)  # teeth currently catching an opposing tooth
 
 HINT_COLOR = (1.0, 1.0, 1.0)  # edge glyphs reminding what the keys do
 HINT_R = 115
-HINT_BG = (0.2, 0.2, 0.2)     # tab behind each glyph
-HINT_TAB_EDGE = 122           # just past the visible screen edge
-HINT_TAB_INNER = 105          # how far the tab pokes into the play area
+HINT_BG = (0.2, 0.2, 0.2)  # tab behind each glyph
+HINT_TAB_EDGE = 122  # just past the visible screen edge
+HINT_TAB_INNER = 105  # how far the tab pokes into the play area
 HINT_TAB_HALF_W = 19
 HINT_TAB_CORNER = 5
 
 LED_COUNT = 12
 LED_TALLY_COLOR = (255, 210, 40)  # steady tally, one LED per solve
-LED_CYCLE_STEP_MS = 120           # sweep speed; full cycle ~1.7s with the beat
+LED_CYCLE_STEP_MS = 120  # sweep speed; full cycle ~1.7s with the beat
 
 # The ominous vortex: hammering the same rotation feeds it; at the limit it
 # bursts and churns the rings with random reversible moves (teeth still
 # latch, and reversibility keeps the mess provably solvable).
-OMINOUS_LIMIT = 8       # same-move presses before the burst
-OMINOUS_VISIBLE = 2     # presses before the vortex starts to show
-BURST_MOVES = 6         # churn moves per burst
-BURST_STEP_MS = 90      # churn speed, one move per step
+OMINOUS_LIMIT = 8  # same-move presses before the burst
+OMINOUS_VISIBLE = 2  # presses before the vortex starts to show
+BURST_MOVES = 6  # churn moves per burst
+BURST_STEP_MS = 90  # churn speed, one move per step
 LED_BURST_COLOR = (255, 30, 30)
 
 # MOTU (motion controls): both gestures are sharp flicks read from the gyro
 # alone, so holding posture never matters. Axes and signs are calibrated
 # against the badge hardware: player-clockwise flick reads negative on gyro
 # z; a top-edge-away tilt flick reads positive on gyro y.
-MOTU_TWIST_AXIS = 2     # gyro axis about the screen normal
+MOTU_TWIST_AXIS = 2  # gyro axis about the screen normal
 MOTU_TWIST_SIGN = -1
-MOTU_TILT_AXIS = 1      # gyro axis for top-edge away/toward flicks
+MOTU_TILT_AXIS = 1  # gyro axis for top-edge away/toward flicks
 MOTU_TILT_SIGN = 1
 
 
@@ -663,8 +663,12 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
         for k in range(5):
             angle = spin + k * (2 * math.pi / 5)
             _tooth(
-                ctx, r, r + 3 + 3 * intensity * pulse,
-                math.cos(angle), math.sin(angle), 1.5 + 2 * intensity,
+                ctx,
+                r,
+                r + 3 + 3 * intensity * pulse,
+                math.cos(angle),
+                math.sin(angle),
+                1.5 + 2 * intensity,
             )
 
     def _draw_key_hints(self, ctx):
@@ -783,16 +787,24 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
             ctx.rgb(*tc)
             v = (p + off) % m.slots
             _tooth(
-                ctx, r, r + self.tooth_len,
-                self.slot_cos[v], self.slot_sin[v], self.tooth_half_w,
+                ctx,
+                r,
+                r + self.tooth_len,
+                self.slot_cos[v],
+                self.slot_sin[v],
+                self.tooth_half_w,
             )
         for off in m.inner_teeth[i]:
             tc = ENGAGED_COLOR if (not self.solved and off in engaged_inner) else color
             ctx.rgb(*tc)
             v = (p + off) % m.slots
             _tooth(
-                ctx, r - self.tooth_len, r,
-                self.slot_cos[v], self.slot_sin[v], self.tooth_half_w,
+                ctx,
+                r - self.tooth_len,
+                r,
+                self.slot_cos[v],
+                self.slot_sin[v],
+                self.tooth_half_w,
             )
 
     def _draw_marker(self, ctx, i):

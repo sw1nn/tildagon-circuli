@@ -143,17 +143,11 @@ def generate(rings, plan, rng):
     machines = 0
     t0 = time.time()
     while len(puzzles) < plan["want"] and machines < plan["machine_cap"]:
-        teeth_min, teeth_max = plan["densities"][
-            rng.randrange(len(plan["densities"]))
-        ]
-        machine = random_machine(
-            rng, rings, teeth_min=teeth_min, teeth_max=teeth_max
-        )
+        teeth_min, teeth_max = plan["densities"][rng.randrange(len(plan["densities"]))]
+        machine = random_machine(rng, rings, teeth_min=teeth_min, teeth_max=teeth_max)
         machines += 1
         dist, decode = distance_map(machine)
-        picks = harvest(
-            machine, dist, decode, plan["per_machine"], plan["floor"], rng
-        )
+        picks = harvest(machine, dist, decode, plan["per_machine"], plan["floor"], rng)
         for d, state in picks:
             puzzles.append(
                 {
@@ -260,7 +254,10 @@ def main():
             for p in puzzles:
                 f.write(struct.pack("<BB", p["dist"], p.get("split", 0)))
                 f.write(bytes(p["start"]))
-                f.writelines(struct.pack("<HH", _mask(inner), _mask(outer)) for inner, outer in zip(p["inner"], p["outer"]))
+                f.writelines(
+                    struct.pack("<HH", _mask(inner), _mask(outer))
+                    for inner, outer in zip(p["inner"], p["outer"])
+                )
         print(
             f"rings {rings}: wrote {len(puzzles)} puzzles, dist "
             f"min {dists[0]} median {dists[len(dists) // 2]} max {dists[-1]} "
