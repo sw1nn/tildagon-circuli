@@ -14,6 +14,7 @@ from game import (
     catalogue_info,
     default_machine,
     is_valid,
+    random_legal_move,
     random_machine,
     random_reversible_move,
     reversible_moves,
@@ -245,6 +246,38 @@ class RatchetTest(unittest.TestCase):
                         game.positions[ring], (state[ring] + direction) % s
                     )
                     self.assertTrue(is_valid(machine, game.positions))
+
+
+class RandomLegalMoveTest(unittest.TestCase):
+    def test_only_returns_moves_that_do_not_jam(self):
+        machine = deep_anchor_machine()
+        rng = random.Random(3)
+        for state in all_valid_states(machine):
+            for _ in range(4):
+                move = random_legal_move(machine, state, rng)
+                self.assertIsNotNone(move)
+                game = Game(machine, list(state))
+                self.assertTrue(game.rotate(move[0], move[1]))
+
+    def test_returns_none_when_every_move_jams(self):
+        # Both rings ratcheted the same way and permanently meshed: any push
+        # gathers both rings, and one of them always refuses.
+        machine = Machine(
+            inner_teeth=[[], [1]],
+            outer_teeth=[[0], []],
+            slots=12,
+            ratchet=[+1, -1],
+        )
+        rng = random.Random(1)
+        self.assertIsNone(random_legal_move(machine, [0, 0], rng))
+
+    def test_reaches_every_legal_move_across_repeated_draws(self):
+        machine = bare_machine()
+        rng = random.Random(11)
+        seen = set()
+        for _ in range(200):
+            seen.add(random_legal_move(machine, [0, 0, 0], rng))
+        self.assertEqual(len(seen), 6)
 
 
 class DrivenRingInvariantTest(unittest.TestCase):

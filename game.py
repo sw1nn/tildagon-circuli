@@ -208,6 +208,30 @@ def random_reversible_move(machine, positions, rng):
     return None
 
 
+def random_legal_move(machine, positions, rng):
+    """One uniformly-chosen non-jamming move as (ring, direction), or None when
+    the machine is jammed solid.
+
+    Safe for the vortex burst because every shipped puzzle is verified
+    dead-end-free: from any state reachable by play, solved is still reachable,
+    so any legal move keeps the board solvable. Uses only rng.randrange, which
+    MicroPython provides.
+    """
+    pos = tuple(positions)
+    candidates = []
+    for ring in range(machine.rings):
+        candidates.append((ring, 1))
+        candidates.append((ring, -1))
+    # Fisher-Yates with rng.randrange: MicroPython's random has no shuffle.
+    for i in range(len(candidates) - 1, 0, -1):
+        j = rng.randrange(i + 1)
+        candidates[i], candidates[j] = candidates[j], candidates[i]
+    for ring, d in candidates:
+        if _apply(machine, pos, ring, d) is not None:
+            return (ring, d)
+    return None
+
+
 # Binary level catalogue (written by tools/generate_catalogue.py):
 # header "CL1" + slots(1B) + rings(1B) + count(2B LE), then fixed-size
 # records of dist(1B) + split(1B, 0 = not a composite) + one start byte per
