@@ -826,3 +826,6 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
         ctx.begin_path()
         ctx.move_to(0, 15)
         ctx.text("COMPLETI!")
+
+
+__app_export__ = Circuli

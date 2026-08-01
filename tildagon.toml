@@ -1,0 +1,13 @@
+[app]
+name = "Circuli"
+category = "Games"
+
+[entry]
+class = "Circuli"
+
+[metadata]
+author = "Neale Swinnerton"
+license = "MIT"
+url = "https://github.com/sw1nn/tildagon-circuli"
+description = "Rotate interlocking rings to line every marker up with the target. Teeth catch and drag neighbours. Don't make it angry."
+version = "1.0.0"
