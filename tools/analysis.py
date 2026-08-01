@@ -119,13 +119,9 @@ def is_dead_end_free(code, slots, doomed):
     return code not in doomed
 
 
-def _step_direction(machine, pos, ring, mode, slots):
-    """Which way the greedy sweep turns `ring`. A ratcheted ring only has one
-    option, so every mode collapses to it and the bot never attempts a turn the
-    ratchet refuses outright."""
-    fixed = machine.ratchet[ring]
-    if fixed:
-        return fixed
+def _step_direction(pos, ring, mode, slots):
+    """Which way the greedy sweep turns `ring`: the mode, or shortest-way-round
+    when the mode is 0."""
     if mode:
         return mode
     return -1 if pos[ring] <= slots // 2 else +1
@@ -157,7 +153,7 @@ def greedy_cost(machine, start, order, mode, max_sweeps=GREEDY_MAX_SWEEPS):
             return moves
         for ring in rings:
             while pos[ring] != 0:
-                d = _step_direction(machine, pos, ring, mode, machine.slots)
+                d = _step_direction(pos, ring, mode, machine.slots)
                 result = _apply(machine, pos, ring, d)
                 if result is None:
                     return None

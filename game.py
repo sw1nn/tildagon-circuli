@@ -236,11 +236,16 @@ def random_legal_move(machine, positions, rng):
 
 # Binary level catalogue (written by tools/generate_catalogue.py):
 # header "CL2" + slots(1B) + rings(1B) + count(2B LE), then fixed-size records
-# of dist(1B) + split(1B, 0 = not a composite) + ratchet_mask(1B, bit i set =
-# ring i is ratcheted) + ratchet_dir(1B, bit i set = clockwise, clear =
-# counter-clockwise) + one start byte per ring + per ring a little-endian
-# 16-bit teeth bitmask for the inner and outer rims. Fixed records allow
-# random access without parsing the file.
+# of dist(1B) + split(1B, 0 = not a composite) + one start byte per ring + per
+# ring a little-endian 16-bit teeth bitmask for the inner and outer rims.
+# Fixed records allow random access without parsing the file.
+#
+# This layout is byte-identical to the pre-ratchet "CL1" format, but CL2
+# stays the magic: it now means "generated for counter-rotating rules" rather
+# than "has ratchets", and a build that still runs the old same-direction
+# rule must not silently read these levels — the puzzle it decodes is not
+# guaranteed solvable under its own movement rule, so the magic has to differ
+# even though the bytes don't.
 CATALOGUE_MAGIC = b"CL2"
 _CATALOGUE_HEADER = struct.calcsize("<3sBBH")
 
@@ -257,47 +262,25 @@ def _mask_teeth(mask, slots):
     return [s for s in range(slots) if (mask >> s) & 1]
 
 
-def ratchet_masks(ratchet):
-    """(ratcheted-rings mask, clockwise-direction mask) for a per-ring ratchet
-    list. Direction bits for free rings stay clear so files round-trip."""
-    mask = 0
-    dirs = 0
-    for i, r in enumerate(ratchet):
-        if r:
-            mask |= 1 << i
-            if r > 0:
-                dirs |= 1 << i
-    return mask, dirs
-
-
 def catalogue_entry(data, index):
-    """Decode puzzle `index`:
-    (inner_teeth, outer_teeth, start, dist, split, ratchet)."""
+    """Decode puzzle `index`: (inner_teeth, outer_teeth, start, dist, split)."""
     slots, rings, count = catalogue_info(data)
     if not 0 <= index < count:
         raise IndexError(f"catalogue has {count} puzzles")
-    record = 4 + 5 * rings
+    record = 2 + 5 * rings
     off = _CATALOGUE_HEADER + index * record
     dist = data[off]
     split = data[off + 1]
-    mask = data[off + 2]
-    dirs = data[off + 3]
-    start = list(data[off + 4 : off + 4 + rings])
-    ratchet = []
-    for i in range(rings):
-        if (mask >> i) & 1:
-            ratchet.append(1 if (dirs >> i) & 1 else -1)
-        else:
-            ratchet.append(0)
+    start = list(data[off + 2 : off + 2 + rings])
     inner = []
     outer = []
-    pos = off + 4 + rings
+    pos = off + 2 + rings
     for _ in range(rings):
         inner_mask, outer_mask = struct.unpack_from("<HH", data, pos)
         inner.append(_mask_teeth(inner_mask, slots))
         outer.append(_mask_teeth(outer_mask, slots))
         pos += 4
-    return inner, outer, start, dist, split, ratchet
+    return inner, outer, start, dist, split
 
 
 class Game:

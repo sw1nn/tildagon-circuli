@@ -3,7 +3,8 @@
 
 For every puzzle: the recorded optimal distance, the cheapest greedy sweep, and
 their ratio. A ratio near 1.0 means inner-to-outer alignment is as good as
-optimal play, which is the weakness the ratchet mechanic exists to fix.
+optimal play, which counter-rotation and the harvest's greedy-resistance
+check exist to prevent.
 
 Usage: python tools/measure_greedy.py
 """
@@ -31,10 +32,8 @@ def measure(rings):
     ratios = []
     failures = 0
     for i in range(count):
-        entry = catalogue_entry(data, i)
-        inner, outer, start, dist = entry[0], entry[1], entry[2], entry[3]
-        ratchet = entry[5] if len(entry) > 5 else None
-        machine = Machine(inner, outer, slots, ratchet)
+        inner, outer, start, dist, _split = catalogue_entry(data, i)
+        machine = Machine(inner, outer, slots)
         greedy = best_greedy_cost(machine, start)
         if greedy is None:
             failures += 1

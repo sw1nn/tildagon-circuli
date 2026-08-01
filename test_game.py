@@ -17,7 +17,6 @@ from game import (
     random_legal_move,
     random_machine,
     random_reversible_move,
-    ratchet_masks,
     reversible_moves,
     start_is_scrambled,
 )
@@ -62,13 +61,12 @@ def load_catalogue(rings):
     slots, file_rings, count = catalogue_info(data)
     puzzles = []
     for i in range(count):
-        inner, outer, start, dist, split, ratchet = catalogue_entry(data, i)
+        inner, outer, start, dist, split = catalogue_entry(data, i)
         entry = {
             "inner": inner,
             "outer": outer,
             "start": start,
             "dist": dist,
-            "ratchet": ratchet,
         }
         if split:
             entry["split"] = split
@@ -342,9 +340,8 @@ class CatalogueRoundTripTest(unittest.TestCase):
             slots, file_rings, count = catalogue_info(data)
             out = [struct.pack("<3sBBH", CATALOGUE_MAGIC, slots, file_rings, count)]
             for i in range(count):
-                inner, outer, start, dist, split, ratchet = catalogue_entry(data, i)
-                mask, dirs = ratchet_masks(ratchet)
-                out.append(struct.pack("<BBBB", dist, split, mask, dirs))
+                inner, outer, start, dist, split = catalogue_entry(data, i)
+                out.append(struct.pack("<BB", dist, split))
                 out.append(bytes(start))
                 for inn, o in zip(inner, outer):
                     out.append(struct.pack("<HH", _teeth_mask(inn), _teeth_mask(o)))
@@ -362,37 +359,6 @@ class CatalogueRoundTripTest(unittest.TestCase):
         stale = struct.pack("<3sBBH", b"CL1", 12, 3, 0)
         with self.assertRaises(ValueError):
             catalogue_info(stale)
-
-    def test_unused_ratchet_direction_bits_are_clear(self):
-        # A set direction bit for a free ring would round-trip differently and
-        # signals a writer bug.
-        for rings in ALL_TIERS:
-            path = os.path.join(CATALOGUE_DIR, "assets", f"levels_{rings}.lvl")
-            with open(path, "rb") as f:
-                data = f.read()
-            _slots, _rings, count = catalogue_info(data)
-            for i in range(count):
-                ratchet = catalogue_entry(data, i)[5]
-                mask, dirs = ratchet_masks(ratchet)
-                self.assertEqual(dirs & ~mask, 0)
-
-
-class RatchetRampTest(unittest.TestCase):
-    RAMP = {3: 0, 4: 0, 5: 1, 6: 2, 7: 2, 8: 3}
-
-    def test_every_puzzle_carries_the_ratchet_count_its_tier_specifies(self):
-        for rings in ALL_TIERS:
-            cat = load_catalogue(rings)
-            for p in cat["puzzles"]:
-                count = sum(1 for r in p["ratchet"] if r)
-                self.assertEqual(count, self.RAMP[rings], f"rings {rings}")
-
-    def test_ratchet_directions_are_only_ever_plus_or_minus_one(self):
-        for rings in ALL_TIERS:
-            cat = load_catalogue(rings)
-            for p in cat["puzzles"]:
-                for r in p["ratchet"]:
-                    self.assertIn(r, (0, +1, -1))
 
 
 class ReversibleChurnTest(unittest.TestCase):

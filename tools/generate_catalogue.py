@@ -22,101 +22,107 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from game import (
     CATALOGUE_MAGIC,
     random_machine,
-    ratchet_masks,
     start_is_scrambled,
 )
-from tools.analysis import decode, distance_map
+from tools.analysis import (
+    best_greedy_cost,
+    build_predecessors,
+    decode,
+    distance_map,
+    doomed_states,
+    is_dead_end_free,
+)
 
-# The ratchet ramp the app relies on: how many one-way rings each shipped tier
-# carries. Tiers 3-4 stay rules-clean so the base mechanics and the vortex are
-# learned before the new rule arrives.
-RAMP = {3: 0, 4: 0, 5: 1, 6: 2, 7: 2, 8: 3}
+# Acceptance bar for the degenerate inner-to-outer sweep: a start only ships if
+# the best greedy variant costs at least this multiple of the true optimum, or
+# fails outright. The pre-change baseline (tools/measure_greedy.py) found a
+# median ratio of exactly 1.00 on every tier and a worst case anywhere of only
+# 1.53, so 1.5 is the bar that is actually reachable without starving any
+# tier.
+GREEDY_RATIO = 1.5
 
-# Base pools are keyed by (rings, ratchet_count). Dense machines feel
-# treacherous but have SHALLOW solvable spaces (measured: at 3-5 teeth almost
-# nothing sits more than ~6 moves from solved), so depth comes from the
-# lighter densities and the distance map decides which machines make the cut.
-# Pools that only feed composites need fewer puzzles than shipped tiers.
+# Per ring count: puzzles wanted, max starts taken per machine, minimum
+# acceptable solve distance, a cap on machines tried, and the teeth-density
+# ranges to sample per machine. Dense machines feel treacherous but have
+# SHALLOW solvable spaces (measured: at 3-5 teeth almost nothing sits more
+# than ~6 moves from solved), so depth comes from the lighter densities and
+# the distance map decides which machines make the cut.
 BASE_PLAN = {
-    (3, 0): {
+    3: {
         "want": 72,
         "per_machine": 3,
         "floor": 7,
-        "machine_cap": 400,
+        "machine_cap": 1200,
         "densities": [(2, 4), (3, 4), (3, 5)],
     },
-    (3, 1): {
-        "want": 48,
-        "per_machine": 3,
-        "floor": 7,
-        "machine_cap": 400,
-        "densities": [(2, 4), (3, 4), (3, 5)],
-    },
-    (4, 0): {
+    4: {
         "want": 64,
         "per_machine": 4,
         "floor": 9,
-        "machine_cap": 250,
+        "machine_cap": 900,
         "densities": [(2, 3), (2, 4), (3, 4)],
     },
-    (4, 1): {
-        "want": 40,
-        "per_machine": 4,
-        "floor": 9,
-        "machine_cap": 250,
-        "densities": [(2, 3), (2, 4), (3, 4)],
-    },
-    (4, 2): {
-        "want": 40,
-        "per_machine": 4,
-        "floor": 9,
-        "machine_cap": 250,
-        "densities": [(2, 3), (2, 4), (3, 4)],
-    },
-    (5, 1): {
+    5: {
         "want": 36,
         "per_machine": 4,
         "floor": 10,
-        "machine_cap": 150,
+        "machine_cap": 250,
         "densities": [(2, 3), (2, 4)],
     },
 }
-
-# Which base pool each directly-generated tier ships.
-TIER_SOURCE = {3: (3, 0), 4: (4, 0), 5: (5, 1)}
 
 # Ring counts beyond exhaustive reach (12^n states) are COMPOSITES: two base
 # puzzles spliced at a boundary gap that carries teeth on the inner side only,
 # so the halves never interact and the minimum solve distance is exactly the
 # sum of the halves' verified distances. "split" records the boundary for
-# re-verification. Half ratchet counts sum to the tier's ramp entry.
+# re-verification.
 COMPOSITE_PLAN = {
-    6: {"want": 36, "halves": ((3, 1), (3, 1))},
-    7: {"want": 24, "halves": ((4, 1), (3, 1))},
-    8: {"want": 24, "halves": ((4, 2), (4, 1))},
+    6: {"want": 36, "halves": (3, 3)},
+    7: {"want": 24, "halves": (4, 3)},
+    8: {"want": 24, "halves": (4, 4)},
 }
 
 
-def harvest(machine, dist, per_machine, floor, rng):
-    """The hardest properly-scrambled starts of one machine: states within
-    80% of the machine's own maximum distance, at or above the floor."""
+def harvest(machine, dist, per_machine, floor, rng, preds=None):
+    """The hardest properly-scrambled starts of one machine that are also safe
+    and greedy-resistant: states within 80% of the machine's own maximum
+    distance, at or above the floor, from which no play can strand the player,
+    and which the degenerate sweep cannot solve cheaply.
+
+    The greedy bot is the expensive check (up to 6 searches per candidate), so
+    it only runs over the top-80% band, not every candidate above the floor,
+    and stops as soon as enough picks are found. `doomed_states` is computed
+    once per machine, so the per-candidate safety test is a set membership
+    rather than a fresh search.
+    """
+    doomed = doomed_states(machine, dist, preds)
     cands = []
     for code, d in dist.items():
         if d < floor:
             continue
         state = decode(code, machine.rings, machine.slots)
-        if start_is_scrambled(state):
-            cands.append((d, state))
+        if not start_is_scrambled(state):
+            continue
+        if not is_dead_end_free(code, machine.slots, doomed):
+            continue
+        cands.append((d, state))
     if not cands:
         return []
     dmax = max(d for d, _ in cands)
     top = [(d, st) for d, st in cands if d >= max(floor, int(dmax * 0.8))]
     rng.shuffle(top)
-    return top[:per_machine]
+    picks = []
+    for d, state in top:
+        greedy = best_greedy_cost(machine, state)
+        if greedy is not None and greedy < GREEDY_RATIO * d:
+            continue
+        picks.append((d, state))
+        if len(picks) >= per_machine:
+            break
+    return picks
 
 
-def generate(key, plan, rng):
-    rings, ratchet_count = key
+def generate(rings, plan, rng):
     puzzles = []
     machines = 0
     t0 = time.time()
@@ -127,31 +133,30 @@ def generate(key, plan, rng):
             rings,
             teeth_min=teeth_min,
             teeth_max=teeth_max,
-            ratchet_count=ratchet_count,
         )
         machines += 1
-        dist = distance_map(machine)
-        picks = harvest(machine, dist, plan["per_machine"], plan["floor"], rng)
+        preds = build_predecessors(machine)
+        dist = distance_map(machine, preds)
+        picks = harvest(machine, dist, plan["per_machine"], plan["floor"], rng, preds)
         for d, state in picks:
             puzzles.append(
                 {
                     "inner": machine.inner_teeth,
                     "outer": machine.outer_teeth,
-                    "ratchet": machine.ratchet,
                     "start": list(state),
                     "dist": d,
                 }
             )
         if picks:
             print(
-                f"{key}: machine {machines} "
+                f"rings {rings}: machine {machines} "
                 f"(teeth {teeth_min}-{teeth_max}) -> "
                 f"dists {sorted(d for d, _ in picks)}, "
                 f"total {len(puzzles)}/{plan['want']} [{time.time() - t0:.0f}s]",
                 flush=True,
             )
     print(
-        f"{key}: tried {machines} machines in {time.time() - t0:.0f}s",
+        f"rings {rings}: tried {machines} machines in {time.time() - t0:.0f}s",
         flush=True,
     )
     return puzzles[: plan["want"]]
@@ -181,7 +186,6 @@ def compose(entry_a, entry_b, rng, slots=12):
     return {
         "inner": inner,
         "outer": outer,
-        "ratchet": list(entry_a["ratchet"]) + list(entry_b["ratchet"]),
         "start": list(entry_a["start"]) + list(entry_b["start"]),
         "dist": entry_a["dist"] + entry_b["dist"],
         "split": k,
@@ -189,8 +193,8 @@ def compose(entry_a, entry_b, rng, slots=12):
 
 
 def compose_tier(plan, pools, rng):
-    key_a, key_b = plan["halves"]
-    pool_a, pool_b = pools[key_a], pools[key_b]
+    rings_a, rings_b = plan["halves"]
+    pool_a, pool_b = pools[rings_a], pools[rings_b]
     if not pool_a or not pool_b:
         # A base tier came up empty; report rather than crash on randrange.
         return []
@@ -201,7 +205,7 @@ def compose_tier(plan, pools, rng):
         attempts += 1
         ia = rng.randrange(len(pool_a))
         ib = rng.randrange(len(pool_b))
-        if key_a == key_b and ia == ib:
+        if rings_a == rings_b and ia == ib:
             continue
         if (ia, ib) in seen:
             continue
@@ -221,23 +225,15 @@ def main():
     out_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     failed = []
     pools = {}
-    for key, plan in BASE_PLAN.items():
-        pools[key] = generate(key, plan, rng)
-    tiers = {rings: pools[key] for rings, key in TIER_SOURCE.items()}
+    for rings, plan in BASE_PLAN.items():
+        pools[rings] = generate(rings, plan, rng)
     for rings, plan in COMPOSITE_PLAN.items():
-        tiers[rings] = compose_tier(plan, pools, rng)
-    for rings, puzzles in sorted(tiers.items()):
+        pools[rings] = compose_tier(plan, pools, rng)
+    for rings, puzzles in sorted(pools.items()):
         if not puzzles:
             failed.append(rings)
             print(f"rings {rings}: NO puzzles found — file not written", flush=True)
             continue
-        for p in puzzles:
-            count = sum(1 for r in p["ratchet"] if r)
-            if count != RAMP[rings]:
-                sys.exit(
-                    f"rings {rings}: puzzle has {count} ratcheted rings, "
-                    f"ramp wants {RAMP[rings]}"
-                )
         dists = sorted(p["dist"] for p in puzzles)
         assets = os.path.join(out_dir, "assets")
         if not os.path.isdir(assets):
@@ -246,8 +242,7 @@ def main():
         with open(path, "wb") as f:
             f.write(struct.pack("<3sBBH", CATALOGUE_MAGIC, 12, rings, len(puzzles)))
             for p in puzzles:
-                mask, dirs = ratchet_masks(p["ratchet"])
-                f.write(struct.pack("<BBBB", p["dist"], p.get("split", 0), mask, dirs))
+                f.write(struct.pack("<BB", p["dist"], p.get("split", 0)))
                 f.write(bytes(p["start"]))
                 f.writelines(
                     struct.pack("<HH", _mask(inner), _mask(outer))
