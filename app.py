@@ -112,19 +112,26 @@ def _tooth(ctx, r0, r1, ca, sa, half_w):
     ctx.fill()
 
 
-class Circuli(app.App):
+# The `app` import is the firmware's base module; static analysis resolves
+# the name to this file instead because both are called app.py.
+class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
     """Circuli: rotate the interlocking rings so every alignment marker points
     to the top."""
 
     def __init__(self):
         super().__init__()
         self.button_states = Buttons(self)
-        random.seed(time.ticks_ms())
+        # ticks_ms is MicroPython-only; the simulator fakes it.
+        random.seed(time.ticks_ms())  # pyright: ignore[reportAttributeAccessIssue]
         self.t = 0
         self.page = "help"  # pages: help -> mode chooser -> game (or menu)
         self.motu = False
-        self._twist = None
-        self._tilt = None
+        self._twist = FlickDial()
+        # Tilt is a flick-AND-RETURN gesture: measured returns swing to
+        # ~-360 deg/s, so a higher fire threshold plus a long quiet time
+        # keep the return stroke from firing a reverse step (calibrated
+        # flicks run 300-900 deg/s).
+        self._tilt = FlickDial(fire_dps=150.0, rearm_dps=40.0, quiet_ms=400.0)
         self.ring_count = START_RINGS
         self._catalogues = {}
         self.solve_count = 0
@@ -198,9 +205,8 @@ class Circuli(app.App):
         # Dials receive no samples while the victory sweep or a burst plays
         # out, so re-arm them explicitly or the first flick of the new board
         # would be swallowed waiting for quiet time.
-        if self._twist is not None:
-            self._twist.reset()
-            self._tilt.reset()
+        self._twist.reset()
+        self._tilt.reset()
 
     def _rotate(self, ring, direction):
         """All rotations funnel through here: the engaged-teeth cache is only
@@ -279,9 +285,8 @@ class Circuli(app.App):
         self.solved = False
         self._calm_vortex()
         self._engaged = None
-        if self._twist is not None:
-            self._twist.reset()
-            self._tilt.reset()
+        self._twist.reset()
+        self._tilt.reset()
 
     def _restart_game(self):
         """Back to the beginning: 3 rings, tally cleared."""
@@ -342,12 +347,8 @@ class Circuli(app.App):
                 self._needs_render = True
             elif b.pressed(BUTTON_TYPES["LEFT"]) and imu is not None:
                 self.motu = True
-                self._twist = FlickDial()
-                # Tilt is a flick-AND-RETURN gesture: measured returns swing
-                # to ~-360 deg/s, so a higher fire threshold plus a long
-                # quiet time keep the return stroke from firing a reverse
-                # step (calibrated flicks run 300-900 deg/s).
-                self._tilt = FlickDial(fire_dps=150.0, rearm_dps=40.0, quiet_ms=400.0)
+                self._twist.reset()
+                self._tilt.reset()
                 self.page = None
                 self.button_states.clear()
                 self._needs_render = True
@@ -401,7 +402,7 @@ class Circuli(app.App):
         if b.pressed(BUTTON_TYPES["LEFT"]):
             if self._register_rotate(-1):
                 self._rotate(self.selected, -1)
-        if self.motu and imu is not None:
+        if self.motu:
             self._update_motu(delta)
         if self.game.is_solved():
             self._mark_solved()
@@ -416,6 +417,8 @@ class Circuli(app.App):
         # flicks exactly like button presses, so repeat-flicking one way is
         # punished the same as mashing. A sharp tilt flick (top edge
         # away/toward) steps the selection outward/inward.
+        if imu is None:
+            return
         gyro = imu.gyro_read()
         step = self._twist.feed(gyro[MOTU_TWIST_AXIS] * MOTU_TWIST_SIGN, delta)
         if step:

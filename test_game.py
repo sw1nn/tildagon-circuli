@@ -302,7 +302,7 @@ class ReversibleChurnTest(unittest.TestCase):
                 game = Game(m, p["start"])
                 for _ in range(churns):
                     move = random_reversible_move(m, game.positions, rng)
-                    self.assertIsNotNone(move)
+                    assert move is not None
                     game.rotate(move[0], move[1])
                 k = p["split"]
                 limit = p["dist"] + churns
@@ -353,9 +353,9 @@ class CatalogueTest(unittest.TestCase):
                 half_a = Machine(p["inner"][:k], p["outer"][:k], cat["slots"])
                 half_b = Machine(p["inner"][k:], p["outer"][k:], cat["slots"])
                 da = solve_distance(half_a, p["start"][:k], p["dist"])
-                self.assertIsNotNone(da)
+                assert da is not None
                 db = solve_distance(half_b, p["start"][k:], p["dist"] - da)
-                self.assertIsNotNone(db)
+                assert db is not None
                 self.assertEqual(da + db, p["dist"])
 
     def test_catalogue_distances_are_exact_for_three_rings(self):
