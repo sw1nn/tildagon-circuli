@@ -191,8 +191,8 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
             # Re-pick uniformly among the others: no back-to-back repeats.
             pick = (pick + 1 + random.randrange(count - 1)) % count
         self._last_pick[self.ring_count] = pick
-        inner, outer, start, _dist, _split = catalogue_entry(data, pick)
-        self.machine = Machine(inner, outer, slots)
+        inner, outer, start, _dist, _split, ratchet = catalogue_entry(data, pick)
+        self.machine = Machine(inner, outer, slots, ratchet)
         self._puzzle_start = list(start)
         self.game = Game(self.machine, start)
         self._layout()

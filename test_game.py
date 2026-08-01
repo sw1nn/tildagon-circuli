@@ -17,6 +17,7 @@ from game import (
     random_legal_move,
     random_machine,
     random_reversible_move,
+    ratchet_masks,
     reversible_moves,
     start_is_scrambled,
 )
@@ -61,8 +62,14 @@ def load_catalogue(rings):
     slots, file_rings, count = catalogue_info(data)
     puzzles = []
     for i in range(count):
-        inner, outer, start, dist, split = catalogue_entry(data, i)
-        entry = {"inner": inner, "outer": outer, "start": start, "dist": dist}
+        inner, outer, start, dist, split, ratchet = catalogue_entry(data, i)
+        entry = {
+            "inner": inner,
+            "outer": outer,
+            "start": start,
+            "dist": dist,
+            "ratchet": ratchet,
+        }
         if split:
             entry["split"] = split
         puzzles.append(entry)
@@ -363,6 +370,15 @@ class RandomMachineTest(unittest.TestCase):
                     for t in combined:
                         self.assertTrue(0 <= t < m.slots)
 
+    def test_ratchet_count_is_honoured_with_valid_directions(self):
+        for rings in (3, 4, 5):
+            for count in range(rings + 1):
+                rng = random.Random(rings * 100 + count)
+                m = random_machine(rng, rings, ratchet_count=count)
+                self.assertEqual(sum(1 for r in m.ratchet if r), count)
+                for r in m.ratchet:
+                    self.assertIn(r, (0, +1, -1))
+
 
 ALL_TIERS = (3, 4, 5, 6, 7, 8)
 
@@ -385,8 +401,9 @@ class CatalogueRoundTripTest(unittest.TestCase):
             slots, file_rings, count = catalogue_info(data)
             out = [struct.pack("<3sBBH", CATALOGUE_MAGIC, slots, file_rings, count)]
             for i in range(count):
-                inner, outer, start, dist, split = catalogue_entry(data, i)
-                out.append(struct.pack("<BB", dist, split))
+                inner, outer, start, dist, split, ratchet = catalogue_entry(data, i)
+                mask, dirs = ratchet_masks(ratchet)
+                out.append(struct.pack("<BBBB", dist, split, mask, dirs))
                 out.append(bytes(start))
                 for inn, o in zip(inner, outer):
                     out.append(struct.pack("<HH", _teeth_mask(inn), _teeth_mask(o)))
@@ -400,6 +417,42 @@ class CatalogueRoundTripTest(unittest.TestCase):
         with self.assertRaises(IndexError):
             catalogue_entry(data, count)
 
+    def test_the_previous_format_is_rejected_rather_than_misread(self):
+        stale = struct.pack("<3sBBH", b"CL1", 12, 3, 0)
+        with self.assertRaises(ValueError):
+            catalogue_info(stale)
+
+    def test_unused_ratchet_direction_bits_are_clear(self):
+        # A set direction bit for a free ring would round-trip differently and
+        # signals a writer bug.
+        for rings in ALL_TIERS:
+            path = os.path.join(CATALOGUE_DIR, "assets", f"levels_{rings}.lvl")
+            with open(path, "rb") as f:
+                data = f.read()
+            _slots, _rings, count = catalogue_info(data)
+            for i in range(count):
+                ratchet = catalogue_entry(data, i)[5]
+                mask, dirs = ratchet_masks(ratchet)
+                self.assertEqual(dirs & ~mask, 0)
+
+
+class RatchetRampTest(unittest.TestCase):
+    RAMP = {3: 0, 4: 0, 5: 1, 6: 2, 7: 2, 8: 3}
+
+    def test_every_puzzle_carries_the_ratchet_count_its_tier_specifies(self):
+        for rings in ALL_TIERS:
+            cat = load_catalogue(rings)
+            for p in cat["puzzles"]:
+                count = sum(1 for r in p["ratchet"] if r)
+                self.assertEqual(count, self.RAMP[rings], f"rings {rings}")
+
+    def test_ratchet_directions_are_only_ever_plus_or_minus_one(self):
+        for rings in ALL_TIERS:
+            cat = load_catalogue(rings)
+            for p in cat["puzzles"]:
+                for r in p["ratchet"]:
+                    self.assertIn(r, (0, +1, -1))
+
 
 class ReversibleChurnTest(unittest.TestCase):
     def test_reversible_churn_preserves_solvability(self):
@@ -411,7 +464,7 @@ class ReversibleChurnTest(unittest.TestCase):
         churns = 6
         for _ in range(5):
             p = cat["puzzles"][rng.randrange(len(cat["puzzles"]))]
-            m = Machine(p["inner"], p["outer"], cat["slots"])
+            m = Machine(p["inner"], p["outer"], cat["slots"], p["ratchet"])
             game = Game(m, p["start"])
             for _ in range(churns):
                 options = reversible_moves(m, game.positions)
@@ -430,7 +483,7 @@ class ReversibleChurnTest(unittest.TestCase):
         rng = random.Random(7)
         for _ in range(10):
             p = cat["puzzles"][rng.randrange(len(cat["puzzles"]))]
-            m = Machine(p["inner"], p["outer"], cat["slots"])
+            m = Machine(p["inner"], p["outer"], cat["slots"], p["ratchet"])
             move = random_reversible_move(m, p["start"], rng)
             self.assertIsNotNone(move)
             allowed = {(r, d) for r, d, _res in reversible_moves(m, p["start"])}
@@ -445,7 +498,7 @@ class ReversibleChurnTest(unittest.TestCase):
             rng = random.Random(rings * 11)
             for _ in range(2):
                 p = cat["puzzles"][rng.randrange(len(cat["puzzles"]))]
-                m = Machine(p["inner"], p["outer"], cat["slots"])
+                m = Machine(p["inner"], p["outer"], cat["slots"], p["ratchet"])
                 game = Game(m, p["start"])
                 for _ in range(churns):
                     move = random_reversible_move(m, game.positions, rng)
@@ -453,8 +506,12 @@ class ReversibleChurnTest(unittest.TestCase):
                     game.rotate(move[0], move[1])
                 k = p["split"]
                 limit = p["dist"] + churns
-                half_a = Machine(p["inner"][:k], p["outer"][:k], cat["slots"])
-                half_b = Machine(p["inner"][k:], p["outer"][k:], cat["slots"])
+                half_a = Machine(
+                    p["inner"][:k], p["outer"][:k], cat["slots"], p["ratchet"][:k]
+                )
+                half_b = Machine(
+                    p["inner"][k:], p["outer"][k:], cat["slots"], p["ratchet"][k:]
+                )
                 self.assertIsNotNone(solve_distance(half_a, game.positions[:k], limit))
                 self.assertIsNotNone(solve_distance(half_b, game.positions[k:], limit))
 
@@ -466,7 +523,7 @@ class CatalogueTest(unittest.TestCase):
             self.assertEqual(cat["rings"], rings)
             self.assertTrue(cat["puzzles"])
             for p in cat["puzzles"]:
-                m = Machine(p["inner"], p["outer"], cat["slots"])
+                m = Machine(p["inner"], p["outer"], cat["slots"], p["ratchet"])
                 self.assertEqual(m.rings, rings)
                 self.assertTrue(is_valid(m, [0] * rings))
                 self.assertTrue(is_valid(m, p["start"]))
@@ -493,8 +550,12 @@ class CatalogueTest(unittest.TestCase):
             for _ in range(3):
                 p = cat["puzzles"][rng.randrange(len(cat["puzzles"]))]
                 k = p["split"]
-                half_a = Machine(p["inner"][:k], p["outer"][:k], cat["slots"])
-                half_b = Machine(p["inner"][k:], p["outer"][k:], cat["slots"])
+                half_a = Machine(
+                    p["inner"][:k], p["outer"][:k], cat["slots"], p["ratchet"][:k]
+                )
+                half_b = Machine(
+                    p["inner"][k:], p["outer"][k:], cat["slots"], p["ratchet"][k:]
+                )
                 da = solve_distance(half_a, p["start"][:k], p["dist"])
                 assert da is not None
                 db = solve_distance(half_b, p["start"][k:], p["dist"] - da)
@@ -505,7 +566,7 @@ class CatalogueTest(unittest.TestCase):
         # Every shipped 3-ring puzzle re-verified against the BFS oracle.
         cat = load_catalogue(3)
         for p in cat["puzzles"]:
-            m = Machine(p["inner"], p["outer"], cat["slots"])
+            m = Machine(p["inner"], p["outer"], cat["slots"], p["ratchet"])
             self.assertEqual(solve_distance(m, p["start"], p["dist"]), p["dist"])
 
     def test_catalogue_distances_spot_checked_for_higher_rings(self):
@@ -515,7 +576,7 @@ class CatalogueTest(unittest.TestCase):
             rng = random.Random(rings)
             for _ in range(samples):
                 p = cat["puzzles"][rng.randrange(len(cat["puzzles"]))]
-                m = Machine(p["inner"], p["outer"], cat["slots"])
+                m = Machine(p["inner"], p["outer"], cat["slots"], p["ratchet"])
                 self.assertEqual(solve_distance(m, p["start"], p["dist"]), p["dist"])
 
 

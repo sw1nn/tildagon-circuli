@@ -53,12 +53,20 @@ TEETH_MIN = 3
 TEETH_MAX = 5
 
 
-def random_machine(rng, rings, slots=12, teeth_min=TEETH_MIN, teeth_max=TEETH_MAX):
+def random_machine(
+    rng,
+    rings,
+    slots=12,
+    teeth_min=TEETH_MIN,
+    teeth_max=TEETH_MAX,
+    ratchet_count=0,
+):
     """A random safe: each shared gap gets teeth_min..teeth_max outer and
     inner teeth at distinct random slots, so nothing overlaps at rest and the
     solved state is valid by construction. The decorative rims (innermost
-    inner, outermost outer) stay empty. Uses only rng.randrange, which
-    MicroPython provides."""
+    inner, outermost outer) stay empty. `ratchet_count` rings are picked at
+    random to become one-way, each in a random direction. Uses only
+    rng.randrange, which MicroPython provides."""
     inner_teeth = [[] for _ in range(rings)]
     outer_teeth = [[] for _ in range(rings)]
     span = teeth_max - teeth_min + 1
@@ -72,7 +80,15 @@ def random_machine(rng, rings, slots=12, teeth_min=TEETH_MIN, teeth_max=TEETH_MA
                 picked.append(slot)
         outer_teeth[gap] = sorted(picked[:n_outer])
         inner_teeth[gap + 1] = sorted(picked[n_outer:])
-    return Machine(inner_teeth, outer_teeth, slots)
+    ratchet = [0] * rings
+    chosen = []
+    while len(chosen) < ratchet_count:
+        r = rng.randrange(rings)
+        if r not in chosen:
+            chosen.append(r)
+    for r in chosen:
+        ratchet[r] = 1 if rng.randrange(2) else -1
+    return Machine(inner_teeth, outer_teeth, slots, ratchet)
 
 
 def is_valid(machine, positions):
@@ -233,11 +249,13 @@ def random_legal_move(machine, positions, rng):
 
 
 # Binary level catalogue (written by tools/generate_catalogue.py):
-# header "CL1" + slots(1B) + rings(1B) + count(2B LE), then fixed-size
-# records of dist(1B) + split(1B, 0 = not a composite) + one start byte per
-# ring + per ring a little-endian 16-bit teeth bitmask for the inner and
-# outer rims. Fixed records allow random access without parsing the file.
-CATALOGUE_MAGIC = b"CL1"
+# header "CL2" + slots(1B) + rings(1B) + count(2B LE), then fixed-size records
+# of dist(1B) + split(1B, 0 = not a composite) + ratchet_mask(1B, bit i set =
+# ring i is ratcheted) + ratchet_dir(1B, bit i set = clockwise, clear =
+# counter-clockwise) + one start byte per ring + per ring a little-endian
+# 16-bit teeth bitmask for the inner and outer rims. Fixed records allow
+# random access without parsing the file.
+CATALOGUE_MAGIC = b"CL2"
 _CATALOGUE_HEADER = struct.calcsize("<3sBBH")
 
 
@@ -253,25 +271,47 @@ def _mask_teeth(mask, slots):
     return [s for s in range(slots) if (mask >> s) & 1]
 
 
+def ratchet_masks(ratchet):
+    """(ratcheted-rings mask, clockwise-direction mask) for a per-ring ratchet
+    list. Direction bits for free rings stay clear so files round-trip."""
+    mask = 0
+    dirs = 0
+    for i, r in enumerate(ratchet):
+        if r:
+            mask |= 1 << i
+            if r > 0:
+                dirs |= 1 << i
+    return mask, dirs
+
+
 def catalogue_entry(data, index):
-    """Decode puzzle `index`: (inner_teeth, outer_teeth, start, dist, split)."""
+    """Decode puzzle `index`:
+    (inner_teeth, outer_teeth, start, dist, split, ratchet)."""
     slots, rings, count = catalogue_info(data)
     if not 0 <= index < count:
         raise IndexError(f"catalogue has {count} puzzles")
-    record = 2 + 5 * rings
+    record = 4 + 5 * rings
     off = _CATALOGUE_HEADER + index * record
     dist = data[off]
     split = data[off + 1]
-    start = list(data[off + 2 : off + 2 + rings])
+    mask = data[off + 2]
+    dirs = data[off + 3]
+    start = list(data[off + 4 : off + 4 + rings])
+    ratchet = []
+    for i in range(rings):
+        if (mask >> i) & 1:
+            ratchet.append(1 if (dirs >> i) & 1 else -1)
+        else:
+            ratchet.append(0)
     inner = []
     outer = []
-    pos = off + 2 + rings
+    pos = off + 4 + rings
     for _ in range(rings):
         inner_mask, outer_mask = struct.unpack_from("<HH", data, pos)
         inner.append(_mask_teeth(inner_mask, slots))
         outer.append(_mask_teeth(outer_mask, slots))
         pos += 4
-    return inner, outer, start, dist, split
+    return inner, outer, start, dist, split, ratchet
 
 
 class Game:
