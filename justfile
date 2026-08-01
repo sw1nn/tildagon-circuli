@@ -3,9 +3,9 @@
 _default:
     @just --list
 
-# Run the full test suite (game logic, catalogue, motion input).
+# Run the full test suite (game logic, catalogue, motion input, offline analysis).
 test:
-    python -m unittest test_game test_motion
+    python -m unittest discover --pattern 'test_*.py'
 
 # Regenerate the level catalogue in assets/ (offline exhaustive search).
 gen-levels seed="2026":

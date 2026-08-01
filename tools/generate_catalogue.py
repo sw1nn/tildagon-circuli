@@ -21,11 +21,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from game import (
     CATALOGUE_MAGIC,
-    _apply,
-    is_valid,
     random_machine,
     start_is_scrambled,
 )
+from tools.analysis import decode, distance_map
 
 # Per ring count: puzzles wanted, max starts taken per machine, minimum
 # acceptable solve distance, a cap on machines tried, and the teeth-density
@@ -69,65 +68,14 @@ COMPOSITE_PLAN = {
 }
 
 
-def distance_map(machine):
-    """Exact distance-to-solved for every state that can reach solved.
-
-    States are base-`slots` encoded ints; solved encodes to 0. Returns the
-    {code: distance} map and the decoder.
-    """
-    n, s = machine.rings, machine.slots
-    total = s**n
-
-    def decode(code):
-        state = []
-        for _ in range(n):
-            state.append(code % s)
-            code //= s
-        return tuple(state)
-
-    def encode(state):
-        code = 0
-        for p in reversed(state):
-            code = code * s + p
-        return code
-
-    preds = [None] * total
-    for code in range(total):
-        state = decode(code)
-        if not is_valid(machine, state):
-            continue
-        for ring in range(n):
-            for d in (1, -1):
-                succ = encode(_apply(machine, state, ring, d))
-                bucket = preds[succ]
-                if bucket is None:
-                    preds[succ] = bucket = [code]
-                else:
-                    bucket.append(code)
-
-    dist = {0: 0}
-    frontier = [0]
-    while frontier:
-        nxt = []
-        for c in frontier:
-            bucket = preds[c]
-            if bucket:
-                for p in bucket:
-                    if p not in dist:
-                        dist[p] = dist[c] + 1
-                        nxt.append(p)
-        frontier = nxt
-    return dist, decode
-
-
-def harvest(machine, dist, decode, per_machine, floor, rng):
+def harvest(machine, dist, per_machine, floor, rng):
     """The hardest properly-scrambled starts of one machine: states within
     80% of the machine's own maximum distance, at or above the floor."""
     cands = []
     for code, d in dist.items():
         if d < floor:
             continue
-        state = decode(code)
+        state = decode(code, machine.rings, machine.slots)
         if start_is_scrambled(state):
             cands.append((d, state))
     if not cands:
@@ -146,8 +94,8 @@ def generate(rings, plan, rng):
         teeth_min, teeth_max = plan["densities"][rng.randrange(len(plan["densities"]))]
         machine = random_machine(rng, rings, teeth_min=teeth_min, teeth_max=teeth_max)
         machines += 1
-        dist, decode = distance_map(machine)
-        picks = harvest(machine, dist, decode, plan["per_machine"], plan["floor"], rng)
+        dist = distance_map(machine)
+        picks = harvest(machine, dist, plan["per_machine"], plan["floor"], rng)
         for d, state in picks:
             puzzles.append(
                 {
