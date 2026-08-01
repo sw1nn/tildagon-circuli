@@ -1,0 +1,15 @@
+{
+    // app.py imports Tildagon firmware modules (app, events, system,
+    // tildagonos) and the simulator's imu fake. These paths resolve inside a
+    // badge development environment that materialises the simulator two
+    // levels up; without one the firmware imports simply stay unresolved,
+    // which is harmless — game.py, motion.py, and the tests are pure Python.
+    "extraPaths": [
+        "../../.sim/modules",
+        "../../.sim/sim/fakes"
+    ],
+    "exclude": [
+        "**/__pycache__"
+    ],
+    "typeCheckingMode": "basic"
+}
