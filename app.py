@@ -10,7 +10,7 @@ from tildagonos import tildagonos
 
 import app
 
-from .game import Game, Machine, catalogue_entry, catalogue_info, random_reversible_move
+from .game import Game, Machine, catalogue_entry, catalogue_info, random_legal_move
 from .motion import FlickDial
 
 try:
@@ -58,8 +58,10 @@ LED_TALLY_COLOR = (255, 210, 40)  # steady tally, one LED per solve
 LED_CYCLE_STEP_MS = 120  # sweep speed; full cycle ~1.7s with the beat
 
 # The ominous vortex: hammering the same rotation feeds it; at the limit it
-# bursts and churns the rings with random reversible moves (teeth still
-# latch, and reversibility keeps the mess provably solvable).
+# bursts and churns the rings with any random legal move (teeth still latch).
+# Solvability isn't kept move-by-move; it relies on the catalogue's
+# dead-end-free guarantee: from any state reachable by play, solved stays
+# reachable, so any legal move keeps the board solvable.
 OMINOUS_LIMIT = 8  # same-move presses before the burst
 OMINOUS_VISIBLE = 2  # presses before the vortex starts to show
 BURST_MOVES = 6  # churn moves per burst
@@ -245,13 +247,13 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
         tildagonos.leds.write()
 
     def _advance_burst(self, delta):
-        # One churn move per step so the damage is watchable. Reversible
-        # moves only: the board stays solvable, however bad it looks.
+        # One churn move per step so the damage is watchable. Any legal move
+        # is safe here: the catalogue guarantees a dead-end-free board.
         self._burst_ms += delta
         if self._burst_ms < BURST_STEP_MS:
             return
         self._burst_ms -= BURST_STEP_MS
-        move = random_reversible_move(self.machine, self.game.positions, random)
+        move = random_legal_move(self.machine, self.game.positions, random)
         if move is None:
             self._burst_left = 0
         else:

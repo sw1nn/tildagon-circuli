@@ -149,67 +149,6 @@ def start_is_scrambled(positions):
     return True
 
 
-def _has_single_undo(machine, pos, result, ring, d):
-    """True if some single move maps `result` back to `pos`. The obvious
-    counter-rotation is tried first; drag cascades usually reverse through
-    the same chain, but not always, so all moves are checked."""
-    if _apply(machine, result, ring, -d) == pos:
-        return True
-    for r2 in range(machine.rings):
-        for d2 in (1, -1):
-            if _apply(machine, result, r2, d2) == pos:
-                return True
-    return False
-
-
-def reversible_moves(machine, positions):
-    """Every (ring, direction, result) move from `positions` that some single
-    move provably undoes. Applying only such moves preserves solvability: each
-    step has a way back, so from a solvable state the result stays solvable.
-
-    Atomic moves in general are NOT invertible (a catch that drags neighbours
-    is not always undone by the counter-rotation), so each candidate's undo is
-    found by checking all single moves from its result.
-    """
-    pos = tuple(positions)
-    moves = []
-    for ring in range(machine.rings):
-        for d in (1, -1):
-            result = _apply(machine, pos, ring, d)
-            if result is None:
-                continue
-            if _has_single_undo(machine, pos, result, ring, d):
-                moves.append((ring, d, result))
-    return moves
-
-
-def random_reversible_move(machine, positions, rng):
-    """One uniformly-chosen reversible move as (ring, direction), or None.
-
-    Tries candidate moves in a shuffled order and returns the first that
-    verifies, so the caller pays for roughly one undo-check instead of
-    enumerating the full reversible set — cheap enough for per-frame use on
-    the badge. Distribution is uniform over candidates, which is close
-    enough to uniform over reversible moves for game chaos.
-    """
-    pos = tuple(positions)
-    candidates = []
-    for ring in range(machine.rings):
-        candidates.append((ring, 1))
-        candidates.append((ring, -1))
-    # Fisher-Yates with rng.randrange: MicroPython's random has no shuffle.
-    for i in range(len(candidates) - 1, 0, -1):
-        j = rng.randrange(i + 1)
-        candidates[i], candidates[j] = candidates[j], candidates[i]
-    for ring, d in candidates:
-        result = _apply(machine, pos, ring, d)
-        if result is None:
-            continue
-        if _has_single_undo(machine, pos, result, ring, d):
-            return (ring, d)
-    return None
-
-
 def random_legal_move(machine, positions, rng):
     """One uniformly-chosen non-jamming move as (ring, direction), or None when
     the machine is jammed solid.

@@ -16,8 +16,6 @@ from game import (
     is_valid,
     random_legal_move,
     random_machine,
-    random_reversible_move,
-    reversible_moves,
     start_is_scrambled,
 )
 
@@ -361,44 +359,14 @@ class CatalogueRoundTripTest(unittest.TestCase):
             catalogue_info(stale)
 
 
-class ReversibleChurnTest(unittest.TestCase):
-    def test_reversible_churn_preserves_solvability(self):
-        # The vortex burst punishes button-mashing with random moves, but
-        # draws them only from reversible_moves: churning a catalogue start
-        # must leave the board solvable (within original distance + churns).
-        cat = load_catalogue(3)
-        rng = random.Random(99)
-        churns = 6
-        for _ in range(5):
-            p = cat["puzzles"][rng.randrange(len(cat["puzzles"]))]
-            m = Machine(p["inner"], p["outer"], cat["slots"])
-            game = Game(m, p["start"])
-            for _ in range(churns):
-                options = reversible_moves(m, game.positions)
-                self.assertTrue(options)
-                ring, d, _result = options[rng.randrange(len(options))]
-                game.rotate(ring, d)
-            self.assertIsNotNone(
-                solve_distance(m, game.positions, p["dist"] + churns),
-                f"churned start became unsolvable: {game.positions!r}",
-            )
-
-    def test_random_reversible_move_matches_reversible_set(self):
-        # The fast picker the burst uses must only ever return moves the
-        # exhaustive enumeration also considers reversible.
-        cat = load_catalogue(4)
-        rng = random.Random(7)
-        for _ in range(10):
-            p = cat["puzzles"][rng.randrange(len(cat["puzzles"]))]
-            m = Machine(p["inner"], p["outer"], cat["slots"])
-            move = random_reversible_move(m, p["start"], rng)
-            self.assertIsNotNone(move)
-            allowed = {(r, d) for r, d, _res in reversible_moves(m, p["start"])}
-            self.assertIn(move, allowed)
-
+class LegalMoveChurnTest(unittest.TestCase):
     def test_churned_composites_stay_solvable_per_half(self):
         # Bursts on the 6-8 ring composite tiers: churn with the fast picker,
-        # then verify each independent half can still reach solved.
+        # then verify each independent half can still reach solved. The limit
+        # is widened to dist + 4*churns: with reversible churn each move could
+        # raise the distance-to-solved by at most one, but in a directed move
+        # graph a legal move can raise it by more, so the old bound no longer
+        # holds.
         churns = 6
         for rings in (6, 7, 8):
             cat = load_catalogue(rings)
@@ -408,11 +376,11 @@ class ReversibleChurnTest(unittest.TestCase):
                 m = Machine(p["inner"], p["outer"], cat["slots"])
                 game = Game(m, p["start"])
                 for _ in range(churns):
-                    move = random_reversible_move(m, game.positions, rng)
+                    move = random_legal_move(m, game.positions, rng)
                     assert move is not None
                     game.rotate(move[0], move[1])
                 k = p["split"]
-                limit = p["dist"] + churns
+                limit = p["dist"] + 4 * churns
                 half_a = Machine(p["inner"][:k], p["outer"][:k], cat["slots"])
                 half_b = Machine(p["inner"][k:], p["outer"][k:], cat["slots"])
                 self.assertIsNotNone(solve_distance(half_a, game.positions[:k], limit))
