@@ -379,6 +379,10 @@ class RandomMachineTest(unittest.TestCase):
                 for r in m.ratchet:
                     self.assertIn(r, (0, +1, -1))
 
+    def test_ratchet_count_over_ring_count_is_rejected(self):
+        with self.assertRaises(ValueError):
+            random_machine(random.Random(1), 3, ratchet_count=4)
+
 
 ALL_TIERS = (3, 4, 5, 6, 7, 8)
 

@@ -67,6 +67,8 @@ def random_machine(
     inner, outermost outer) stay empty. `ratchet_count` rings are picked at
     random to become one-way, each in a random direction. Uses only
     rng.randrange, which MicroPython provides."""
+    if ratchet_count > rings:
+        raise ValueError("ratchet_count must not exceed rings")
     inner_teeth = [[] for _ in range(rings)]
     outer_teeth = [[] for _ in range(rings)]
     span = teeth_max - teeth_min + 1
