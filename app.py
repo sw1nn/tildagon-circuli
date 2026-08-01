@@ -2,12 +2,13 @@ import math
 import random
 import time
 
-import app
-from events.input import Buttons, BUTTON_TYPES
+from events.input import BUTTON_TYPES, Buttons
 from system.eventbus import eventbus
 from system.patterndisplay.events import PatternDisable, PatternEnable
 from system.scheduler.events import RequestStopAppEvent
 from tildagonos import tildagonos
+
+import app
 
 from .game import Game, Machine, catalogue_entry, catalogue_info, random_reversible_move
 from .motion import FlickDial
@@ -173,7 +174,7 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
         # and only the picked record is ever decoded.
         data = self._catalogues.get(rings)
         if data is None:
-            path = __file__.rsplit("/", 1)[0] + "/assets/levels_%d.lvl" % rings
+            path = __file__.rsplit("/", 1)[0] + f"/assets/levels_{rings}.lvl"
             with open(path, "rb") as f:
                 data = f.read()
             self._catalogues[rings] = data
@@ -396,12 +397,10 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
         if b.pressed(BUTTON_TYPES["DOWN"]):
             self.selected = (self.selected - 1) % n
             self._calm_vortex()
-        if b.pressed(BUTTON_TYPES["CONFIRM"]):
-            if self._register_rotate(+1):
-                self._rotate(self.selected, +1)
-        if b.pressed(BUTTON_TYPES["LEFT"]):
-            if self._register_rotate(-1):
-                self._rotate(self.selected, -1)
+        if b.pressed(BUTTON_TYPES["CONFIRM"]) and self._register_rotate(+1):
+            self._rotate(self.selected, +1)
+        if b.pressed(BUTTON_TYPES["LEFT"]) and self._register_rotate(-1):
+            self._rotate(self.selected, -1)
         if self.motu:
             self._update_motu(delta)
         if self.game.is_solved():
@@ -421,9 +420,8 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
             return
         gyro = imu.gyro_read()
         step = self._twist.feed(gyro[MOTU_TWIST_AXIS] * MOTU_TWIST_SIGN, delta)
-        if step:
-            if self._register_rotate(step):
-                self._rotate(self.selected, step)
+        if step and self._register_rotate(step):
+            self._rotate(self.selected, step)
         moved = self._tilt.feed(gyro[MOTU_TILT_AXIS] * MOTU_TILT_SIGN, delta)
         if moved:
             self.selected = (self.selected + moved) % self.machine.rings
@@ -524,14 +522,15 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
         ctx.rgb(1.0, 1.0, 1.0)
         ctx.begin_path()
         ctx.move_to(0, y)
-        ctx.text("sel %d" % self.selected)
+        ctx.text(f"sel {self.selected}")
         for i in range(n):
             y += 11
             selected = i == self.selected
             ctx.rgb(*self._ring_color(i, selected))
             ctx.begin_path()
             ctx.move_to(0, y)
-            ctx.text("%sr%d %d" % (">" if selected else "", i, self.game.positions[i]))
+            marker = ">" if selected else ""
+            ctx.text(f"{marker}r{i} {self.game.positions[i]}")
 
     def _draw_help(self, ctx):
         # Launch instruction page; any game button dismisses it (F exits).

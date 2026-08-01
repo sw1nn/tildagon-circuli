@@ -260,8 +260,7 @@ def main():
             for p in puzzles:
                 f.write(struct.pack("<BB", p["dist"], p.get("split", 0)))
                 f.write(bytes(p["start"]))
-                for inner, outer in zip(p["inner"], p["outer"]):
-                    f.write(struct.pack("<HH", _mask(inner), _mask(outer)))
+                f.writelines(struct.pack("<HH", _mask(inner), _mask(outer)) for inner, outer in zip(p["inner"], p["outer"]))
         print(
             f"rings {rings}: wrote {len(puzzles)} puzzles, dist "
             f"min {dists[0]} median {dists[len(dists) // 2]} max {dists[-1]} "

@@ -71,7 +71,7 @@ def is_valid(machine, positions):
     solved state and every state reachable from it by play are valid."""
     s = machine.slots
     for i in range(machine.rings - 1):
-        outer = set((positions[i] + t) % s for t in machine.outer_teeth[i])
+        outer = {(positions[i] + t) % s for t in machine.outer_teeth[i]}
         for t in machine.inner_teeth[i + 1]:
             if (positions[i + 1] + t) % s in outer:
                 return False
@@ -84,7 +84,7 @@ def _would_collide(machine, pos, i, j, group, direction):
     s = machine.slots
     pi = pos[i] + (direction if i in group else 0)
     pj = pos[j] + (direction if j in group else 0)
-    outer = set((pi + t) % s for t in machine.outer_teeth[i])
+    outer = {(pi + t) % s for t in machine.outer_teeth[i]}
     for t in machine.inner_teeth[j]:
         if (pj + t) % s in outer:
             return True
@@ -213,7 +213,7 @@ def catalogue_entry(data, index):
     """Decode puzzle `index`: (inner_teeth, outer_teeth, start, dist, split)."""
     slots, rings, count = catalogue_info(data)
     if not 0 <= index < count:
-        raise IndexError("catalogue has %d puzzles" % count)
+        raise IndexError(f"catalogue has {count} puzzles")
     record = 2 + 5 * rings
     off = _CATALOGUE_HEADER + index * record
     dist = data[off]

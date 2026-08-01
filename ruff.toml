@@ -1,0 +1,10 @@
+# Lint contract for the repo: pyflakes/pycodestyle errors plus import
+# sorting, modern-syntax upgrades, simplifications, comprehensions, refurb,
+# and executable-bit checks. MicroPython on the badge supports everything
+# these rules push toward (f-strings, comprehensions).
+[lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "SIM", "C4", "FURB", "EXE"]
+# SIM110 (rewrite loops as any()/all()) is rejected: generator expressions
+# allocate on MicroPython, and the explicit loops it flags are the badge's
+# hottest paths (_would_collide runs inside every move application).
+ignore = ["SIM110"]

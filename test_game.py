@@ -54,7 +54,7 @@ def solve_distance(machine, start, limit):
 
 
 def load_catalogue(rings):
-    path = os.path.join(CATALOGUE_DIR, "assets", "levels_%d.lvl" % rings)
+    path = os.path.join(CATALOGUE_DIR, "assets", f"levels_{rings}.lvl")
     with open(path, "rb") as f:
         data = f.read()
     slots, file_rings, count = catalogue_info(data)
@@ -150,15 +150,15 @@ class DrivenRingInvariantTest(unittest.TestCase):
                     self.assertEqual(
                         game.positions[ring],
                         expected,
-                        "ring %d driven %+d from %r landed on %d, expected %d"
-                        % (ring, direction, state, game.positions[ring], expected),
+                        f"ring {ring} driven {direction:+d} from {state!r} "
+                        f"landed on {game.positions[ring]}, expected {expected}",
                     )
                     # Moves must also preserve physical validity: teeth can
                     # push each other but never overlap.
                     self.assertTrue(
                         is_valid(machine, game.positions),
-                        "ring %d driven %+d from %r produced overlap %r"
-                        % (ring, direction, state, game.positions),
+                        f"ring {ring} driven {direction:+d} from {state!r} "
+                        f"produced overlap {game.positions!r}",
                     )
 
     def test_default_machine_driven_ring_always_moves_one_slot(self):
@@ -211,7 +211,7 @@ class RandomMachineTest(unittest.TestCase):
                     self.assertEqual(
                         len(combined),
                         len(set(combined)),
-                        "gap %d shares a slot: %r" % (gap, combined),
+                        f"gap {gap} shares a slot: {combined!r}",
                     )
                     for t in combined:
                         self.assertTrue(0 <= t < m.slots)
@@ -232,7 +232,7 @@ class CatalogueRoundTripTest(unittest.TestCase):
         # Independently re-encode every decoded record using only the format
         # documentation; any drift between writer and reader shows up here.
         for rings in ALL_TIERS:
-            path = os.path.join(CATALOGUE_DIR, "assets", "levels_%d.lvl" % rings)
+            path = os.path.join(CATALOGUE_DIR, "assets", f"levels_{rings}.lvl")
             with open(path, "rb") as f:
                 data = f.read()
             slots, file_rings, count = catalogue_info(data)
@@ -243,7 +243,7 @@ class CatalogueRoundTripTest(unittest.TestCase):
                 out.append(bytes(start))
                 for inn, o in zip(inner, outer):
                     out.append(struct.pack("<HH", _teeth_mask(inn), _teeth_mask(o)))
-            self.assertEqual(b"".join(out), data, "rings %d" % rings)
+            self.assertEqual(b"".join(out), data, f"rings {rings}")
 
     def test_entry_index_is_bounds_checked(self):
         path = os.path.join(CATALOGUE_DIR, "assets", "levels_3.lvl")
@@ -273,7 +273,7 @@ class ReversibleChurnTest(unittest.TestCase):
                 game.rotate(ring, d)
             self.assertIsNotNone(
                 solve_distance(m, game.positions, p["dist"] + churns),
-                "churned start became unsolvable: %r" % (game.positions,),
+                f"churned start became unsolvable: {game.positions!r}",
             )
 
     def test_random_reversible_move_matches_reversible_set(self):
