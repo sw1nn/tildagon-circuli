@@ -3,6 +3,7 @@ branch_whitelist = ["main"]
 ignore_merge_commits = true
 
 pre_bump_hooks = [
+    "ruff format --check .",
     "ruff check .",
     "just test",
     '''sh -c "sed --in-place 's/^version = .*/version = \"{{version}}\"/' tildagon.toml"''',
