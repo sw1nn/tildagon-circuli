@@ -44,6 +44,8 @@ INACTIVE_COLOR = (0.5, 0.5, 0.5)  # rings that are not currently selected
 
 SOLVED_COLOR = (0.2, 1.0, 0.3)
 ENGAGED_COLOR = (1.0, 1.0, 1.0)  # teeth currently catching an opposing tooth
+JAM_COLOR = (1.0, 0.25, 0.25)  # driven ring flashes this when a move is refused
+JAM_FLASH_MS = 150
 
 HINT_COLOR = (1.0, 1.0, 1.0)  # edge glyphs reminding what the keys do
 HINT_R = 115
@@ -204,6 +206,8 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
         self._burst_left = 0
         self._burst_ms = 0
         self._engaged = None
+        self._jam_ms = 0
+        self._jam_ring = -1
         self._needs_render = True
         # Dials receive no samples while the victory sweep or a burst plays
         # out, so re-arm them explicitly or the first flick of the new board
@@ -214,7 +218,11 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
     def _rotate(self, ring, direction):
         """All rotations funnel through here: the engaged-teeth cache is only
         valid until positions change."""
-        self.game.rotate(ring, direction)
+        if not self.game.rotate(ring, direction):
+            self._jam_ms = JAM_FLASH_MS
+            self._jam_ring = ring
+            self._needs_render = True
+            return
         self._engaged = None
         self._needs_render = True
 
@@ -288,6 +296,8 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
         self.solved = False
         self._calm_vortex()
         self._engaged = None
+        self._jam_ms = 0
+        self._jam_ring = -1
         self._twist.reset()
         self._tilt.reset()
 
@@ -320,6 +330,11 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
             # The vortex is churning; input waits until it is spent.
             self._advance_burst(delta)
             return True
+        if self._jam_ms:
+            # Render once more on the frame the flash reaches zero, so the
+            # ring draws back in its normal colour rather than staying red.
+            self._jam_ms = max(0, self._jam_ms - delta)
+            self._needs_render = True
         if self.page == "help":
             b = self.button_states
             if b.pressed(BUTTON_TYPES["CANCEL"]):
@@ -549,15 +564,16 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
             "Rotate rings until every",
             "yellow mark sits under",
             "the dotted line.",
-            "Teeth catch and drag",
-            "neighbouring rings!",
+            "Teeth catch and turn a",
+            "neighbour the other way.",
+            "A jam refuses the move.",
             "Don't make it angry tho!",
         )
         for i, line in enumerate(goal):
             if i == len(goal) - 1:
                 ctx.rgb(0.9, 0.3, 0.4)
             ctx.begin_path()
-            ctx.move_to(0, -52 + i * 15)
+            ctx.move_to(0, -52 + i * 13)
             ctx.text(line)
         ctx.rgb(0.7, 0.7, 0.7)
         ctx.font_size = 13
@@ -776,7 +792,10 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
         p = self.game.positions[i]
         r = self.radii[i]
         selected = i == self.selected
-        color = self._ring_color(i, selected)
+        if self._jam_ms and i == self._jam_ring:
+            color = JAM_COLOR
+        else:
+            color = self._ring_color(i, selected)
 
         ctx.line_width = self.ring_stroke + (2 if selected else 0)
         ctx.rgb(*color)
