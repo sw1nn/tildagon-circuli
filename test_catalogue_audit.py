@@ -17,7 +17,9 @@ from tools.analysis import (
     doomed_states,
     is_dead_end_free,
 )
-from tools.generate_catalogue import GREEDY_RATIO
+from tools.generate_catalogue import GREEDY_RATIO, SWEEP_PROOF_FRACTION
+
+ALL_TIERS = (3, 4, 5, 6, 7, 8)
 
 CATALOGUE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -65,6 +67,40 @@ def assert_safe_and_resistant(case, machine, start, dist_recorded):
             GREEDY_RATIO * dist_recorded,
             f"greedy solves {start!r} in {greedy} against optimal {dist_recorded}",
         )
+
+
+class GreedyMixAuditTest(unittest.TestCase):
+    """Whole-catalogue check of the shipped difficulty mix.
+
+    Cheap (greedy sweeps only, no state-space walks), so unlike the deep
+    audits below it covers every entry of every tier: no level may fall to a
+    sweep near-optimally, and levels that defeat every sweep variant must
+    stay a minority — a catalogue of nothing but sweep-proof levels reads as
+    unsolvable to players even though every start is provably solvable.
+    """
+
+    def test_sweep_proof_levels_are_a_minority_everywhere(self):
+        for rings in ALL_TIERS:
+            slots, puzzles = load(rings)
+            sweep_proof = 0
+            for i, p in enumerate(puzzles):
+                machine = Machine(p["inner"], p["outer"], slots)
+                greedy = best_greedy_cost(machine, p["start"])
+                if greedy is None:
+                    sweep_proof += 1
+                else:
+                    self.assertGreaterEqual(
+                        greedy,
+                        GREEDY_RATIO * p["dist"],
+                        f"rings {rings} #{i}: greedy solves in {greedy} "
+                        f"against optimal {p['dist']}",
+                    )
+            self.assertLessEqual(
+                sweep_proof,
+                int(len(puzzles) * SWEEP_PROOF_FRACTION),
+                f"rings {rings}: {sweep_proof}/{len(puzzles)} levels defeat "
+                "every sweep variant",
+            )
 
 
 class BaseTierAuditTest(unittest.TestCase):
