@@ -1,7 +1,9 @@
+import json
 import math
 import random
 import time
 
+import settings
 from events.input import BUTTON_TYPES, Buttons
 from system.eventbus import eventbus
 from system.patterndisplay.events import PatternDisable, PatternEnable
@@ -132,6 +134,10 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
         self.t = 0
         self.page = "help"  # pages: help -> mode chooser -> game (or menu)
         self.motu = False
+        # First-run nudge on the mode chooser, re-shown once per release:
+        # hidden only while the stored version matches this build's.
+        self._version = self._read_version()
+        self._intro_hint = settings.get("circuli_intro_version") != self._version
         self._twist = FlickDial()
         # Tilt is a flick-AND-RETURN gesture: measured returns swing to
         # ~-360 deg/s, so a higher fire threshold plus a long quiet time
@@ -156,6 +162,26 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
         if event.app is self and self._leds_active:
             eventbus.emit(PatternEnable())
             self._leds_active = False
+
+    def _read_version(self):
+        """This build's release version, from the metadata.json the deploy
+        ships next to the code. A failed read degrades to showing the
+        first-run hint."""
+        try:
+            path = __file__.rsplit("/", 1)[0] + "/metadata.json"
+            with open(path) as f:
+                return json.load(f).get("version", "")
+        except (OSError, ValueError):
+            return ""
+
+    def _mark_intro_seen(self):
+        """The player has taken the mode choice with the hint on screen; keep
+        it hidden until the next release changes the version."""
+        if not self._intro_hint:
+            return
+        self._intro_hint = False
+        settings.set("circuli_intro_version", self._version)
+        settings.save()
 
     def _layout(self):
         """Derive ring geometry from the current ring count, and precompute
@@ -363,11 +389,13 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
                 return True
             if b.pressed(BUTTON_TYPES["CONFIRM"]):
                 self.motu = False
+                self._mark_intro_seen()
                 self.page = None
                 self.button_states.clear()
                 self._needs_render = True
             elif b.pressed(BUTTON_TYPES["LEFT"]) and imu is not None:
                 self.motu = True
+                self._mark_intro_seen()
                 self._twist.reset()
                 self._tilt.reset()
                 self.page = None
@@ -612,6 +640,12 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
         ctx.begin_path()
         ctx.move_to(0, -50)
         ctx.text("(choose controls)")
+        if self._intro_hint:
+            ctx.rgb(1.0, 0.9, 0.2)
+            ctx.font_size = 13
+            ctx.begin_path()
+            ctx.move_to(0, -33)
+            ctx.text("first time? start with C")
         ctx.rgb(1.0, 1.0, 1.0)
         ctx.font_size = 16
         ctx.begin_path()
