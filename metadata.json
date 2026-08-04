@@ -5,6 +5,6 @@
     "hidden": false,
     "description": "Rotate interlocking rings to line every marker up with the target. Teeth catch and drag neighbours. Don't make it angry.",
     "author": "Neale Swinnerton",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "license": "MIT"
 }

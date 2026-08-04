@@ -2,6 +2,32 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v1.1.0](https://github.com/sw1nn/tildagon-circuli/compare/4d86cb2e2c5066e2107ded54ef9296cfa4909806..v1.1.0) - 2026-08-04
+#### Features
+- (**app**) once-per-release first-time hint on the mode chooser - ([183aca2](https://github.com/sw1nn/tildagon-circuli/commit/183aca213c0d2dd71bcb70f0b059df00a870c7fd)) - [@sw1nn](https://github.com/sw1nn)
+- (**app**) centre HAERET! callout when a move is refused - ([245e4c2](https://github.com/sw1nn/tildagon-circuli/commit/245e4c240f78ef584f4268fadf7fa0a0c705194c)) - [@sw1nn](https://github.com/sw1nn)
+- (**app**) counter-rotation feedback — flash a ring when the gears bind - ([6dca2e8](https://github.com/sw1nn/tildagon-circuli/commit/6dca2e870692d8673c36c6151de99bc01586b479)) - [@sw1nn](https://github.com/sw1nn)
+- ![BREAKING](https://img.shields.io/badge/BREAKING-red) (**game**) meshing rings counter-rotate like real gears - ([136e897](https://github.com/sw1nn/tildagon-circuli/commit/136e897b1fafd4cfcdf7acb57685d25c87aa3ca3)) - [@sw1nn](https://github.com/sw1nn)
+- (**game**) random_legal_move for churning ratcheted boards - ([1d03319](https://github.com/sw1nn/tildagon-circuli/commit/1d03319a43c5a262fbabe9de47389adfe006e9b3)) - [@sw1nn](https://github.com/sw1nn)
+- (**game**) ratcheted rings that jam when dragged backwards - ([350aa6d](https://github.com/sw1nn/tildagon-circuli/commit/350aa6d2bedb5a18dac8233257bf43bb42d9cf41)) - [@sw1nn](https://github.com/sw1nn)
+- (**levels**) retune harvest to a resistant/sweep-proof mix and regenerate - ([ca5858f](https://github.com/sw1nn/tildagon-circuli/commit/ca5858fae738170023979b886f9d93d185e6163c)) - [@sw1nn](https://github.com/sw1nn)
+- (**levels**) retune generation for counter-rotation and regenerate - ([a8f1253](https://github.com/sw1nn/tildagon-circuli/commit/a8f125343fb8a926363d5c564dd7deeaf673b282)) - [@sw1nn](https://github.com/sw1nn)
+- (**levels**) CL2 catalogue format carrying per-ring ratchets - ([70aa091](https://github.com/sw1nn/tildagon-circuli/commit/70aa091e0cce8aa50707e923edfc3a67824f4b3e)) - [@sw1nn](https://github.com/sw1nn)
+#### Bug Fixes
+- (**game**) reject ratchet_count exceeding ring count in random_machine - ([ee2f6f3](https://github.com/sw1nn/tildagon-circuli/commit/ee2f6f378d582b7b794d7b4c3a52b6694da8b2dc)) - [@sw1nn](https://github.com/sw1nn)
+#### Tests
+- (**tools**) measure the degenerate sweep against shipped levels - ([8f58d07](https://github.com/sw1nn/tildagon-circuli/commit/8f58d075c27e26363d154910c6993e388c10446c)) - [@sw1nn](https://github.com/sw1nn)
+#### Build system
+- add a release recipe driving cocogitto - ([0a16694](https://github.com/sw1nn/tildagon-circuli/commit/0a166943bf855c260252df94d526189f38fe8c98)) - [@sw1nn](https://github.com/sw1nn)
+- title GitHub releases so the app store can ingest them - ([062d542](https://github.com/sw1nn/tildagon-circuli/commit/062d542aa316f50b3d37e31f3cfb1329fa38bf6d)) - [@sw1nn](https://github.com/sw1nn)
+- resolve simulator path via env-configurable .sim symlink - ([4d86cb2](https://github.com/sw1nn/tildagon-circuli/commit/4d86cb2e2c5066e2107ded54ef9296cfa4909806)) - [@sw1nn](https://github.com/sw1nn)
+#### Refactoring
+- (**game**) churn with any legal move instead of reversible ones - ([e7de0a5](https://github.com/sw1nn/tildagon-circuli/commit/e7de0a5e2e0a5d7d16355ed9c74b9af9a3d47e1d)) - [@sw1nn](https://github.com/sw1nn)
+- (**tools**) extract offline analysis with dead-end and greedy checks - ([ce07a42](https://github.com/sw1nn/tildagon-circuli/commit/ce07a429cf8474039cc437f35b121e1defbc5b4f)) - [@sw1nn](https://github.com/sw1nn)
+- remove ratchets from the level format and tooling - ([149dff4](https://github.com/sw1nn/tildagon-circuli/commit/149dff4a27cfa086ee2af30e404b44d580db06c6)) - [@sw1nn](https://github.com/sw1nn)
+
+- - -
+
 ## [v1.0.0](https://github.com/sw1nn/tildagon-circuli/compare/fef3a0180d7295a64bd8640491994a9821932f7e..v1.0.0) - 2026-08-01
 #### Features
 - (**app**) in-game menu with reset-level and restart-game - ([a0f1d96](https://github.com/sw1nn/tildagon-circuli/commit/a0f1d96f26ecfd782201132949587f4639c02517)) - [@sw1nn](https://github.com/sw1nn)
