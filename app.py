@@ -44,8 +44,9 @@ INACTIVE_COLOR = (0.5, 0.5, 0.5)  # rings that are not currently selected
 
 SOLVED_COLOR = (0.2, 1.0, 0.3)
 ENGAGED_COLOR = (1.0, 1.0, 1.0)  # teeth currently catching an opposing tooth
-JAM_COLOR = (1.0, 0.25, 0.25)  # driven ring flashes this when a move is refused
-JAM_FLASH_MS = 150
+JAM_COLOR = (1.0, 0.25, 0.25)  # refused move: driven ring + centre callout
+JAM_FLASH_MS = 700
+JAM_DISC_R = 40  # knockout disc behind the callout; victory disc is 66
 
 HINT_COLOR = (1.0, 1.0, 1.0)  # edge glyphs reminding what the keys do
 HINT_R = 115
@@ -223,6 +224,8 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
             self._jam_ring = ring
             self._needs_render = True
             return
+        # A legal move dismisses any lingering jam callout at once.
+        self._jam_ms = 0
         self._engaged = None
         self._needs_render = True
 
@@ -518,6 +521,8 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
             self._burst_left or self._repeat_count >= OMINOUS_VISIBLE
         ):
             self._draw_vortex(ctx)
+        if self._jam_ms and not self.solved:
+            self._draw_jam(ctx)
         if self.solved:
             self._draw_cracked(ctx)
         elif DEBUG:
@@ -841,6 +846,27 @@ class Circuli(app.App):  # pyright: ignore[reportAttributeAccessIssue]
         ctx.begin_path()
         ctx.arc(0, 0, r, a - half, a + half, False)
         ctx.stroke()
+
+    def _draw_jam(self, ctx):
+        # Refused-move callout, drawn over the vortex so the message wins the
+        # centre. The knockout disc keeps the text legible over the inner
+        # rings while leaving the outer board visible.
+        ctx.rgb(0, 0, 0)
+        ctx.begin_path()
+        ctx.arc(0, 0, JAM_DISC_R, 0, 2 * math.pi, False)
+        ctx.fill()
+        ctx.rgb(*JAM_COLOR)
+        ctx.font_size = 22
+        ctx.text_align = ctx.CENTER
+        ctx.text_baseline = ctx.MIDDLE
+        ctx.begin_path()
+        ctx.move_to(0, -8)
+        ctx.text("HAERET!")
+        ctx.rgb(0.55, 0.55, 0.55)
+        ctx.font_size = 12
+        ctx.begin_path()
+        ctx.move_to(0, 12)
+        ctx.text("(jammed)")
 
     def _draw_cracked(self, ctx):
         # Knockout disc: the text spans the rings, so clear a circle behind
